@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>???? Agent ??????</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #0b1220;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --line: rgba(255,255,255,.10);
+      --accent: #60a5fa;
+      --accent-2: #34d399;
+      --warn: #fbbf24;
+      --shadow: 0 20px 60px rgba(0,0,0,.28);
+      --radius: 18px;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0, var(--bg) 45%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+    .hero {
+      background: linear-gradient(180deg, rgba(17,24,39,.96), rgba(17,24,39,.86));
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0 0 8px; font-size: 2rem; }
+    h2 { margin: 0 0 8px; font-size: 1.15rem; }
+    h3 { margin: 22px 0 10px; font-size: 1rem; color: #dbeafe; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    .grid { display: grid; gap: 16px; }
+    .card {
+      background: rgba(17,24,39,.92);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .card-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+    .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: .72rem; color: var(--accent-2); margin-bottom: 8px; }
+    .link-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      display: inline-block; padding: 10px 14px; border-radius: 12px; text-decoration: none;
+      background: var(--accent); color: white; font-weight: 600; border: 1px solid transparent;
+    }
+    .btn.secondary { background: transparent; border-color: var(--line); color: var(--text); }
+    .panel {
+      background: rgba(15,23,42,.55); border: 1px solid var(--line); border-radius: 18px; padding: 18px;
+    }
+    code { color: #bfdbfe; }
+    pre {
+      margin: 14px 0 0; padding: 16px; overflow: auto; white-space: pre-wrap;
+      background: #0b1120; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; font-size: .92rem;
+    }
+    a { color: #93c5fd; }
+    ul { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>???? Agent ??????</h1>
+      <p>???? HTML ??????????????????????????????????????</p>
+      <p class="muted">??????????? <b>Open file</b> ? <b>Open in VS Code</b> ???????????????</p>
+    </section>
+
+    <section class="card">
+      <div class="eyebrow">Quick Index</div>
+      <h2>??????</h2>
+      <ul>
+        <li><a href="file:///D:/code_helper/apps/api/main.py">apps/api/main.py</a> <span class="muted">(D:/code_helper/apps/api/main.py:17)</span></li><li><a href="file:///D:/code_helper/apps/api/services/task_service.py">apps/api/services/task_service.py</a> <span class="muted">(D:/code_helper/apps/api/services/task_service.py:28)</span></li><li><a href="file:///D:/code_helper/apps/api/services/event_service.py">apps/api/services/event_service.py</a> <span class="muted">(D:/code_helper/apps/api/services/event_service.py:14)</span></li><li><a href="file:///D:/code_helper/apps/api/services/rollback_service.py">apps/api/services/rollback_service.py</a> <span class="muted">(D:/code_helper/apps/api/services/rollback_service.py:14)</span></li><li><a href="file:///D:/code_helper/apps/api/storage/sqlite.py">apps/api/storage/sqlite.py</a> <span class="muted">(D:/code_helper/apps/api/storage/sqlite.py:95)</span></li><li><a href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py">packages/agent-core/src/agent_core/workflow/pipeline.py</a> <span class="muted">(D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:59)</span></li><li><a href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py">packages/agent-core/src/agent_core/workflow/parallel_branches.py</a> <span class="muted">(D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:33)</span></li><li><a href="file:///D:/code_helper/packages/agent-core/src/agent_core/llm.py">packages/agent-core/src/agent_core/llm.py</a> <span class="muted">(D:/code_helper/packages/agent-core/src/agent_core/llm.py:44)</span></li><li><a href="file:///D:/code_helper/apps/web/src/components/TaskDetail.tsx">apps/web/src/components/TaskDetail.tsx</a> <span class="muted">(D:/code_helper/apps/web/src/components/TaskDetail.tsx:81)</span></li><li><a href="file:///D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx">apps/web/src/components/BranchComparisonPanel.tsx</a> <span class="muted">(D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:294)</span></li><li><a href="file:///D:/code_helper/apps/web/src/components/CollaborationPanel.tsx">apps/web/src/components/CollaborationPanel.tsx</a> <span class="muted">(D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32)</span></li><li><a href="file:///D:/code_helper/apps/web/src/components/TaskTimeline.tsx">apps/web/src/components/TaskTimeline.tsx</a> <span class="muted">(D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30)</span></li><li><a href="file:///D:/code_helper/apps/web/src/components/LogPanel.tsx">apps/web/src/components/LogPanel.tsx</a> <span class="muted">(D:/code_helper/apps/web/src/components/LogPanel.tsx:3)</span></li><li><a href="file:///D:/code_helper/apps/web/src/api/client.ts">apps/web/src/api/client.ts</a> <span class="muted">(D:/code_helper/apps/web/src/api/client.ts:22)</span></li><li><a href="file:///D:/code_helper/apps/api/api/routes/tasks.py">apps/api/api/routes/tasks.py</a> <span class="muted">(D:/code_helper/apps/api/api/routes/tasks.py:12)</span></li><li><a href="file:///D:/code_helper/apps/api/api/routes/events.py">apps/api/api/routes/events.py</a> <span class="muted">(D:/code_helper/apps/api/api/routes/events.py:9)</span></li><li><a href="file:///D:/code_helper/apps/api/api/routes/security.py">apps/api/api/routes/security.py</a> <span class="muted">(D:/code_helper/apps/api/api/routes/security.py:10)</span></li><li><a href="file:///D:/code_helper/config/llm_config.json">config/llm_config.json</a> <span class="muted">(D:/code_helper/config/llm_config.json:1)</span></li>
+      </ul>
+    </section>
+
+    <div class="grid">
+      
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Backend entry</div>
+          <h2>FastAPI ?? create_app</h2>
+          <p class="muted">D:/code_helper/apps/api/main.py:17</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/main.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/main.py:17">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   11 | from apps.api.services.event_service import EventService
+   12 | from apps.api.services.rollback_service import RollbackService
+   13 | from apps.api.services.task_service import TaskService
+   14 | from apps.api.storage.sqlite import SQLiteStore
+   15 | 
+   16 | 
+&gt;  17 | def create_app() -&gt; FastAPI:
+   18 |     settings = get_settings()
+   19 |     app = FastAPI(title=settings.app_name, version=&quot;0.1.0&quot;)
+   20 |     app.add_middleware(
+   21 |         CORSMiddleware,
+   22 |         allow_origins=list(settings.cors_origins),
+   23 |         allow_credentials=True,</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Task service</div>
+          <h2>?????? run_task</h2>
+          <p class="muted">D:/code_helper/apps/api/services/task_service.py:60</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/services/task_service.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/services/task_service.py:60">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   54 |     def list_tasks(self) -&gt; list[TaskDetail]:
+   55 |         return self.store.list_tasks()
+   56 | 
+   57 |     def get_task(self, task_id: str) -&gt; TaskDetail:
+   58 |         return self.store.get_task_detail(task_id)
+   59 | 
+&gt;  60 |     async def run_task(self, task_id: str) -&gt; TaskRunResponse:
+   61 |         task = await asyncio.to_thread(self.store.get_task, task_id)
+   62 |         if task.status in ACTIVE_STATUSES and task_id in self._running_tasks:
+   63 |             return TaskRunResponse(task=task, accepted=False)
+   64 | 
+   65 |         await self._transition(task_id, TaskStatus.queued, current_step=TaskStep.read.value)
+   66 |         running = asyncio.create_task(self._execute(task_id))</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Task execute</div>
+          <h2>?????? _execute</h2>
+          <p class="muted">D:/code_helper/apps/api/services/task_service.py:74</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/services/task_service.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/services/task_service.py:74">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   68 |         running.add_done_callback(lambda _task: self._running_tasks.pop(task_id, None))
+   69 |         return TaskRunResponse(task=await asyncio.to_thread(self.store.get_task, task_id), accepted=True)
+   70 | 
+   71 |     async def rollback(self, task_id: str):
+   72 |         return await self.rollback_service.rollback(task_id)
+   73 | 
+&gt;  74 |     async def _execute(self, task_id: str) -&gt; None:
+   75 |         task = await asyncio.to_thread(self.store.get_task_detail, task_id)
+   76 |         retrieval_query = self._build_retrieval_query(task.title, task.description, task.focus_paths)
+   77 |         memory_matches = await asyncio.to_thread(self.store.search_memory, retrieval_query, 5)
+   78 |         if memory_matches:
+   79 |             await self.events.emit(
+   80 |                 task_id=task_id,</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Event service</div>
+          <h2>???? emit</h2>
+          <p class="muted">D:/code_helper/apps/api/services/event_service.py:19</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/services/event_service.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/services/event_service.py:19">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   13 | 
+   14 | class EventService:
+   15 |     def __init__(self, store: SQLiteStore):
+   16 |         self.store = store
+   17 |         self._subscribers: dict[str, set[asyncio.Queue[TaskEventModel]]] = defaultdict(set)
+   18 | 
+&gt;  19 |     async def emit(
+   20 |         self,
+   21 |         *,
+   22 |         task_id: str,
+   23 |         event_type: str,
+   24 |         step: TaskStep | str | None,
+   25 |         message: str,</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Rollback service</div>
+          <h2>???? rollback</h2>
+          <p class="muted">D:/code_helper/apps/api/services/rollback_service.py:19</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/services/rollback_service.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/services/rollback_service.py:19">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   13 | 
+   14 | class RollbackService:
+   15 |     def __init__(self, store: SQLiteStore, events: EventService):
+   16 |         self.store = store
+   17 |         self.events = events
+   18 | 
+&gt;  19 |     async def rollback(self, task_id: str) -&gt; RollbackResponse:
+   20 |         task = await asyncio.to_thread(self.store.get_task_detail, task_id)
+   21 |         snapshot = await asyncio.to_thread(self.store.get_latest_snapshot, task_id)
+   22 |         if snapshot is None:
+   23 |             raise RuntimeError(&quot;No snapshot is available for rollback&quot;)
+   24 | 
+   25 |         await self.events.emit(</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">SQLite store</div>
+          <h2>???? create_task</h2>
+          <p class="muted">D:/code_helper/apps/api/storage/sqlite.py:107</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/api/storage/sqlite.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/api/storage/sqlite.py:107">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>  101 |         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+  102 |         with self._connect() as connection:
+  103 |             connection.executescript(SCHEMA)
+  104 |             self._ensure_columns(connection)
+  105 |             connection.commit()
+  106 | 
+&gt; 107 |     def create_task(
+  108 |         self,
+  109 |         *,
+  110 |         title: str,
+  111 |         description: str,
+  112 |         repository_path: str,
+  113 |         focus_paths: list[str],</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">LLM planner</div>
+          <h2>????? plan_next_step</h2>
+          <p class="muted">D:/code_helper/packages/agent-core/src/agent_core/llm.py:137</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/packages/agent-core/src/agent_core/llm.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/packages/agent-core/src/agent_core/llm.py:137">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>  131 |             summary=summary or &#x27;Patch verified successfully.&#x27;,
+  132 |             rationale=rationale,
+  133 |             model=self.model,
+  134 |             provider=self.provider,
+  135 |         )
+  136 | 
+&gt; 137 |     def plan_next_step(self, *, state: Mapping[str, Any]) -&gt; ReActDecision | None:
+  138 |         if not self.enabled:
+  139 |             return None
+  140 | 
+  141 |         system_prompt = (
+  142 |             &#x27;You are the planner in a ReAct code-repair loop. &#x27;
+  143 |             &#x27;Choose exactly one action: read_more, patch, or finish. &#x27;</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Pipeline loop</div>
+          <h2>???? _run_collaborative_loop</h2>
+          <p class="muted">D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:193</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:193">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>  187 |         for candidate in list_python_files(self.workspace_root):
+  188 |             relative = candidate.relative_to(self.workspace_root).as_posix()
+  189 |             if relative not in contents and relative.startswith(&#x27;tests/&#x27;):
+  190 |                 contents[relative] = read_text_file(candidate)
+  191 |         return contents
+  192 | 
+&gt; 193 |     async def _run_collaborative_loop(
+  194 |         self,
+  195 |         *,
+  196 |         task_id: str,
+  197 |         task_title: str,
+  198 |         task_description: str,
+  199 |         retrieval_hits: list[RetrievalHit],</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Parallel branches</div>
+          <h2>???? choose_parallel_branch</h2>
+          <p class="muted">D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:33</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:33">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   27 |     profile: str
+   28 |     decision: ReActDecision
+   29 |     score: float
+   30 |     candidates: list[BranchCandidate]
+   31 | 
+   32 | 
+&gt;  33 | async def choose_parallel_branch(
+   34 |     workflow: Any,
+   35 |     *,
+   36 |     turn: int,
+   37 |     task_title: str,
+   38 |     task_description: str,
+   39 |     retrieval_hits: list[RetrievalHit],</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Task detail UI</div>
+          <h2>???? applyEvent</h2>
+          <p class="muted">D:/code_helper/apps/web/src/components/TaskDetail.tsx:19</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/web/src/components/TaskDetail.tsx">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/web/src/components/TaskDetail.tsx:19">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   13 | interface Props {
+   14 |   taskId: string
+   15 |   onRefreshTasks: () =&gt; void | Promise&lt;void&gt;
+   16 |   onSelectTask: (taskId: string) =&gt; void
+   17 | }
+   18 | 
+&gt;  19 | function applyEvent(detail: TaskDetail, event: TaskEvent): TaskDetail {
+   20 |   const next: TaskDetail = { ...detail, events: [...detail.events, event] }
+   21 | 
+   22 |   if (event.type === &#x27;task.started&#x27;) {
+   23 |     next.status = &#x27;reading&#x27;
+   24 |   }
+   25 | </pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Branch compare UI</div>
+          <h2>???? buildTurns</h2>
+          <p class="muted">D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:128</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:128">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>  122 |   if (branch.selected) {
+  123 |     branch.status = &#x27;selected&#x27;
+  124 |     group.selectedBranchId = branch.branch
+  125 |   }
+  126 | }
+  127 | 
+&gt; 128 | function buildTurns(events: TaskEvent[]): TurnGroup[] {
+  129 |   const turns = new Map&lt;number, TurnGroup&gt;()
+  130 | 
+  131 |   for (const event of events) {
+  132 |     const payload = event.payload as Record&lt;string, unknown&gt;
+  133 |     const branchName = typeof payload.branch === &#x27;string&#x27; ? payload.branch : null
+  134 |     const turnNumber = normalizeTurn(payload.turn)</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Collaboration UI</div>
+          <h2>????? CollaborationPanel</h2>
+          <p class="muted">D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/web/src/components/CollaborationPanel.tsx">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   26 | 
+   27 | function getAction(payload: Record&lt;string, unknown&gt;): string | null {
+   28 |   const value = payload.action
+   29 |   return typeof value === &#x27;string&#x27; &amp;&amp; value ? value : null
+   30 | }
+   31 | 
+&gt;  32 | export function CollaborationPanel({ events }: { events: TaskEvent[] }) {
+   33 |   const collaborationEvents = events.filter((event) =&gt; {
+   34 |     return (
+   35 |       event.type.startsWith(&#x27;agent.&#x27;) ||
+   36 |       event.type === &#x27;branch.created&#x27; ||
+   37 |       event.type === &#x27;branch.selected&#x27; ||
+   38 |       event.type === &#x27;replan.requested&#x27; ||</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Timeline UI</div>
+          <h2>????? TaskTimeline</h2>
+          <p class="muted">D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/web/src/components/TaskTimeline.tsx">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>   24 | 
+   25 |       return `${key}: ${String(value)}`
+   26 |     })
+   27 |     .join(&#x27; | &#x27;)
+   28 | }
+   29 | 
+&gt;  30 | export function TaskTimeline({ events }: { events: TaskEvent[] }) {
+   31 |   return (
+   32 |     &lt;section className=&quot;card&quot;&gt;
+   33 |       &lt;div className=&quot;panel-title-row&quot;&gt;
+   34 |         &lt;div&gt;
+   35 |           &lt;h3&gt;Task flow&lt;/h3&gt;
+   36 |           &lt;p className=&quot;muted&quot;&gt;A replayable event stream of the agent loop.&lt;/p&gt;</pre>
+    </section>
+    
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Log UI</div>
+          <h2>???? LogPanel</h2>
+          <p class="muted">D:/code_helper/apps/web/src/components/LogPanel.tsx:3</p>
+        </div>
+        <div class="link-row">
+          <a class="btn" href="file:///D:/code_helper/apps/web/src/components/LogPanel.tsx">Open file</a>
+          <a class="btn secondary" href="vscode://file/D:/code_helper/apps/web/src/components/LogPanel.tsx:3">Open in VS Code</a>
+        </div>
+      </div>
+      <pre>    1 | import type { TestOutcome } from &#x27;../types&#x27;
+    2 | 
+&gt;   3 | export function LogPanel({ result, lastError }: { result: TestOutcome | null; lastError: string | null }) {
+    4 |   return (
+    5 |     &lt;section className=&quot;card&quot;&gt;
+    6 |       &lt;div className=&quot;panel-title-row&quot;&gt;
+    7 |         &lt;div&gt;
+    8 |           &lt;h3&gt;Test logs&lt;/h3&gt;
+    9 |           &lt;p className=&quot;muted&quot;&gt;Captured stdout, stderr, and exit code from the verification run.&lt;/p&gt;</pre>
+    </section>
+    
+    </div>
+
+    <section class="card">
+      <h2>????</h2>
+      <ol>
+        <li><a href="file:///D:/code_helper/docs/architecture.md">architecture.md</a></li>
+        <li><a href="file:///D:/code_helper/docs/technical_guide.md">technical_guide.md</a></li>
+        <li><a href="file:///D:/code_helper/apps/api/main.py">apps/api/main.py</a></li>
+        <li><a href="file:///D:/code_helper/apps/api/services/task_service.py">apps/api/services/task_service.py</a></li>
+        <li><a href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py">packages/agent-core/src/agent_core/workflow/pipeline.py</a></li>
+        <li><a href="file:///D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py">packages/agent-core/src/agent_core/workflow/parallel_branches.py</a></li>
+      </ol>
+    </section>
+  </div>
+</body>
+</html>

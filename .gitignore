@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+coverage/
+apps/web/dist/
+data/app.db
+data/*.db
+data/snapshots/*
+!data/snapshots/.gitkeep
