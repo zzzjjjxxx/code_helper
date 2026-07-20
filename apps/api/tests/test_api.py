@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import shutil
 import sqlite3
@@ -90,14 +90,25 @@ def test_task_run_patch_and_rollback() -> None:
         assert final_task["latest_test_result"]["passed"] is True
         assert final_task["latest_retrieval"]
         assert final_task["memory"]
+        assert len(final_task["memory"]) >= 3
+        assert {memory["kind"] for memory in final_task["memory"]} >= {
+            "run_summary",
+            "task_plan",
+            "lesson_success",
+        }
 
         detail = client.get(f"/tasks/{task_id}").json()
         event_types = [event["type"] for event in detail["events"]]
         branch_created_events = [event for event in detail["events"] if event["type"] == "branch.created"]
         branch_selected_events = [event for event in detail["events"] if event["type"] == "branch.selected"]
-        assert len(branch_created_events) >= 3
+        goal_planned_events = [event for event in detail["events"] if event["type"] == "goal.planned"]
+        goal_completed_events = [event for event in detail["events"] if event["type"] == "goal.completed"]
+        comparison_events = [event for event in detail["events"] if event["type"] == "branch.comparison.completed"]
+        assert len(branch_created_events) >= 5
         assert len(branch_selected_events) >= 1
-        assert branch_selected_events[0]["payload"]["candidate_count"] >= 3
+        assert len(goal_planned_events) == 1
+        assert len(goal_completed_events) >= 3
+        assert branch_selected_events[0]["payload"]["candidate_count"] >= 5
         assert any(candidate.get("selected") for candidate in branch_selected_events[0]["payload"]["candidates"])
         assert "agent.planner.completed" in event_types
         assert "agent.executor.started" in event_types
@@ -109,8 +120,16 @@ def test_task_run_patch_and_rollback() -> None:
         assert "command.started" in event_types
         assert "command.completed" in event_types
         assert "llm.plan.skipped" in event_types
+        assert "goal.planned" in event_types
+        assert "goal.completed" in event_types
         assert "react.observation" in event_types
+        assert "branch.comparison.completed" in event_types
+        assert comparison_events and comparison_events[0]["payload"]["candidate_count"] >= 5
+        assert comparison_events[0]["payload"]["turn_count"] >= 1
         assert detail["events"][-1]["payload"]["review_decision"] == "approve"
+        assert len(detail["subgoals"]) == 3
+        assert [subgoal["phase"] for subgoal in detail["subgoals"]] == ["inspect", "implement", "verify"]
+        assert all(subgoal["status"] == "completed" for subgoal in detail["subgoals"])
 
         rollback_response = client.post(f"/tasks/{task_id}/rollback")
         assert rollback_response.status_code == 200
@@ -129,13 +148,22 @@ def test_task_run_patch_and_rollback() -> None:
         second_final = wait_for_terminal(client, second_task_id)
         assert second_final["status"] == "succeeded"
         assert second_final["latest_retrieval"]
+        assert len(second_final["memory"]) >= 3
 
         second_detail = client.get(f"/tasks/{second_task_id}").json()
         second_event_types = [event["type"] for event in second_detail["events"]]
         assert "memory.loaded" in second_event_types
         memory_events = [event for event in second_detail["events"] if event["type"] == "memory.loaded"]
         assert memory_events and len(memory_events[0]["payload"]["matches"]) >= 1
+        retrieval_events = [event for event in second_detail["events"] if event["type"] == "retrieval.completed"]
+        assert retrieval_events and retrieval_events[0]["payload"]["memory_note_count"] >= 1
+        assert retrieval_events[0]["payload"]["memory_hints"]
+
         assert second_detail["memory"]
+        assert {memory["kind"] for memory in second_detail["memory"]} >= {
+            "run_summary",
+            "task_plan",
+        }
 
         policy = client.get("/security/policy")
         assert policy.status_code == 200
@@ -149,6 +177,7 @@ def test_task_run_patch_and_rollback() -> None:
         artifact_types = [artifact["type"] for artifact in artifact_rows]
         assert "diff" in artifact_types
         assert "test_report" in artifact_types
+        assert "branch_comparison" in artifact_types
         assert any(".lower()" in artifact["content"] for artifact in artifact_rows if artifact["type"] == "diff")
 
         with client.stream("GET", f"/tasks/{task_id}/events") as stream:
@@ -157,6 +186,24 @@ def test_task_run_patch_and_rollback() -> None:
             assert "event:" in first_chunk
             assert "task.started" in first_chunk or "file.read" in first_chunk
             stream.close()
+
+
+def test_rollback_without_snapshot_records_failure() -> None:
+    reset_state()
+
+    with TestClient(app) as client:
+        created = client.post("/tasks", json={"title": "Rollback without snapshot"})
+        task_id = created.json()["id"]
+
+        rollback_response = client.post(f"/tasks/{task_id}/rollback")
+        assert rollback_response.status_code == 400
+        assert "No snapshot" in rollback_response.text
+
+        detail = client.get(f"/tasks/{task_id}").json()
+        assert detail["status"] == "created"
+        assert detail["current_step"] == "rollback"
+        assert detail["last_error"] == "No snapshot is available for rollback"
+        assert any(event["type"] == "rollback.failed" for event in detail["events"])
 
 
 def test_command_isolation_blocks_unapproved_commands() -> None:
@@ -187,3 +234,9 @@ def test_rollbacks_reject_tampered_snapshots() -> None:
         rollback_response = client.post(f"/tasks/{task_id}/rollback")
         assert rollback_response.status_code == 400
         assert "workspace" in rollback_response.text
+
+        failed_detail = client.get(f"/tasks/{task_id}").json()
+        assert failed_detail["status"] == "succeeded"
+        assert failed_detail["last_error"]
+        assert failed_detail["current_step"] == "rollback"
+        assert any(event["type"] == "rollback.failed" for event in failed_detail["events"])

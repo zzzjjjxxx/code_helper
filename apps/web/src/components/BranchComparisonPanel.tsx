@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+﻿import { useMemo } from 'react'
 
 import type { TaskEvent } from '../types'
 
@@ -29,6 +29,24 @@ interface TurnGroup {
   branches: BranchView[]
   candidateCount: number
   updatedAt: string
+}
+
+interface ComparisonSummary {
+  summary: string
+  turnCount: number
+  candidateCount: number
+  winningBranch: string | null
+  reviewDecision: string
+  finalTestPassed: boolean
+  changedFiles: string[]
+  llmUsed: boolean
+  highlights: string[]
+  turns: Array<Record<string, unknown>>
+}
+
+interface BranchComparisonView {
+  turns: TurnGroup[]
+  comparison: ComparisonSummary | null
 }
 
 function emptyBranch(branch: string): BranchView {
@@ -94,6 +112,7 @@ function ensureBranch(group: TurnGroup, branchName: string): BranchView {
   group.branches.push(branch)
   return branch
 }
+
 function findBranchGroup(turns: Map<number, TurnGroup>, branchName: string): TurnGroup | null {
   for (const group of turns.values()) {
     if (group.branches.some((branch) => branch.branch === branchName)) {
@@ -125,13 +144,31 @@ function applyCandidate(group: TurnGroup, candidate: Record<string, unknown>): v
   }
 }
 
-function buildTurns(events: TaskEvent[]): TurnGroup[] {
+function buildView(events: TaskEvent[]): BranchComparisonView {
+  // DOC_ANCHOR: branch_comparison.build_view
   const turns = new Map<number, TurnGroup>()
+  let comparison: ComparisonSummary | null = null
 
   for (const event of events) {
     const payload = event.payload as Record<string, unknown>
     const branchName = typeof payload.branch === 'string' ? payload.branch : null
     const turnNumber = normalizeTurn(payload.turn)
+
+    if (event.type === 'branch.comparison.completed') {
+      comparison = {
+        summary: typeof payload.summary === 'string' ? payload.summary : event.message,
+        turnCount: typeof payload.turn_count === 'number' ? payload.turn_count : 0,
+        candidateCount: typeof payload.candidate_count === 'number' ? payload.candidate_count : 0,
+        winningBranch: typeof payload.winning_branch === 'string' && payload.winning_branch ? payload.winning_branch : null,
+        reviewDecision: typeof payload.review_decision === 'string' ? payload.review_decision : '',
+        finalTestPassed: payload.final_test_passed === true,
+        changedFiles: normalizeList(payload.changed_files),
+        llmUsed: payload.llm_used === true,
+        highlights: normalizeList(payload.highlights),
+        turns: Array.isArray(payload.turns) ? payload.turns.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [],
+      }
+      continue
+    }
 
     if (event.type === 'branch.selected') {
       const group = ensureTurn(turns, turnNumber)
@@ -227,7 +264,7 @@ function buildTurns(events: TaskEvent[]): TurnGroup[] {
     }
   }
 
-  return Array.from(turns.values())
+  const turnList = Array.from(turns.values())
     .filter((group) => group.turn > 0 || group.branches.length > 0)
     .sort((left, right) => left.turn - right.turn)
     .map((group) => ({
@@ -243,6 +280,8 @@ function buildTurns(events: TaskEvent[]): TurnGroup[] {
       }),
       candidateCount: group.branches.length,
     }))
+
+  return { turns: turnList, comparison }
 }
 
 function describeDelta(reference: BranchView | null, current: BranchView): string[] {
@@ -292,9 +331,10 @@ function statusLabel(status: BranchView['status']): string {
 }
 
 export function BranchComparisonPanel({ events }: { events: TaskEvent[] }) {
-  const turns = useMemo(() => buildTurns(events), [events])
+  // DOC_ANCHOR: branch_comparison.panel
+  const { turns, comparison } = useMemo(() => buildView(events), [events])
 
-  if (turns.length === 0) {
+  if (turns.length === 0 && !comparison) {
     return (
       <section className="card">
         <div className="panel-title-row">
@@ -321,6 +361,31 @@ export function BranchComparisonPanel({ events }: { events: TaskEvent[] }) {
           {turns.length} turns / {totalCandidates} candidates
         </span>
       </div>
+
+      {comparison ? (
+        <article className="timeline-item" style={{ marginBottom: '1rem' }}>
+          <div className="timeline-item-top">
+            <strong>Comparison summary</strong>
+            <span className="muted">
+              {comparison.turnCount} turns / {comparison.candidateCount} candidates
+            </span>
+          </div>
+          <p>{comparison.summary}</p>
+          <div className="timeline-meta">
+            <small className="muted">Winner: {comparison.winningBranch || 'n/a'}</small>
+            <small className="muted">Review: {comparison.reviewDecision || 'pending'}</small>
+            <small className="muted">Tests: {comparison.finalTestPassed ? 'passed' : 'failed'}</small>
+            <small className="muted">LLM: {comparison.llmUsed ? 'used' : 'heuristic'}</small>
+          </div>
+          {comparison.highlights.length > 0 ? (
+            <ul style={{ margin: '0.75rem 0 0', paddingLeft: '1.1rem' }}>
+              {comparison.highlights.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+        </article>
+      ) : null}
 
       <div className="artifact-list">
         {turns.map((group) => {
@@ -391,7 +456,7 @@ export function BranchComparisonPanel({ events }: { events: TaskEvent[] }) {
                         </div>
                         <div>
                           <span className="muted">Compare</span>
-                          <div>{branch.selected ? 'Winner for this turn' : deltas.join(' · ') || 'Alternative branch'}</div>
+                          <div>{branch.selected ? 'Winner for this turn' : deltas.join(' | ') || 'Alternative branch'}</div>
                         </div>
                       </div>
                     </article>
@@ -405,3 +470,5 @@ export function BranchComparisonPanel({ events }: { events: TaskEvent[] }) {
     </section>
   )
 }
+
+

@@ -1,4 +1,4 @@
-import type { TaskEvent } from '../types'
+﻿import type { TaskEvent } from '../types'
 
 function summarizePayload(payload: Record<string, unknown>): string {
   const entries = Object.entries(payload)
@@ -57,3 +57,4 @@ export function TaskTimeline({ events }: { events: TaskEvent[] }) {
     </section>
   )
 }
+

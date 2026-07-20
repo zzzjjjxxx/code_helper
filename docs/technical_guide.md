@@ -1,69 +1,75 @@
 ﻿# 研发助手 Agent 系统技术文档
 
-这份文档按“先看系统，再看文件，再看关键代码”的方式写。目标是让第一次接触这个项目的人，也能大概看懂它是怎么工作的。
-
-下面这些都是本地文件链接，在 Codex 或 VS Code 这类支持跳转的编辑器里可以直接点开。
+这份文档按“先看全局，再看运行链路，再看关键文件”的顺序写，目标是让第一次接触项目的人也能快速看懂。
 
 ## 1. 这个项目在做什么
 
-它不是一个普通聊天框，而是一个“会干活的研发助手”:
+它不是聊天机器人，而是一个会“接任务、查代码、改代码、跑测试、看结果、可回滚”的研发助手。
+
+一次完整任务大致会做这些事：
 
 1. 接收任务
 2. 找相关代码
-3. 读代码上下文
-4. 让 Agent 先想方案，再决定改哪一块
-5. 应用补丁
-6. 跑测试
-7. 根据结果继续修复或结束
-8. 记录事件、产物、记忆，并支持回滚
+3. 读取上下文文件
+4. 让 Agent 规划
+5. 并行比较多个分支
+6. 应用 patch
+7. 跑测试
+8. 根据结果继续修复或结束
+9. 保存事件、产物、记忆
+10. 必要时回滚
 
-你可以把它理解成一个“能自己查代码、改代码、跑测试、看结果”的小型研发流水线。
-
-## 2. 系统结构一眼看懂
+## 2. 系统结构
 
 ### 后端
 
-- [`apps/api/main.py`](<../apps/api/main.py:L17>)：FastAPI 入口，负责把所有路由、服务、存储系统组装起来。
-- [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L28>)：任务执行中枢，真正把“创建任务 -> 跑任务 -> 存事件 -> 存产物”串起来。
-- [`apps/api/services/event_service.py`](<D:/code_helper/apps/api/services/event_service.py:#L14-L28>)：负责把事件写入数据库，并实时推送给前端。
-- [`apps/api/services/rollback_service.py`](<D:/code_helper/apps/api/services/rollback_service.py:14>)：负责回滚，把代码恢复到快照前状态。
-- [`apps/api/storage/sqlite.py`](<D:/code_helper/apps/api/storage/sqlite.py:95>)：SQLite 数据层，保存任务、事件、快照、产物、记忆。
+- [FastAPI 入口](<../apps/api/main.py#L17>)：组装路由、存储、事件和回滚服务。
+- [任务服务](<../apps/api/services/task_service.py#L28>)：真正把任务闭环串起来。
+- [事件服务](<../apps/api/services/event_service.py#L14>)：写事件并实时推送给前端。
+- [回滚服务](<../apps/api/services/rollback_service.py#L14>)：恢复到快照前状态。
+- [SQLite 存储](<../apps/api/storage/sqlite.py#L95>)：保存任务、事件、快照、产物、记忆、子目标。
+>>>>>>> 5b7b264 (update)
 
 ### Agent 层
 
-- [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:59>)：主工作流。它定义了 Agent 怎么读、怎么想、怎么改、怎么测。
-- [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:1>)：并行多 Agent 协作。每轮同时让多个“角色”出方案，再选出最优分支。
-- [`packages/agent-core/src/agent_core/llm.py`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:44>)：LLM 调用封装。负责把任务状态发给模型，并解析模型返回的 JSON。
+- [工作流主类](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)：任务如何被读、被规划、被修改、被验证。
+- [并行分支选择](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)：同一轮里让多个角色同时出方案。
+- [LLM 封装](<../packages/agent-core/src/agent_core/llm.py#L65>)：把状态发给模型，再把 JSON 结果解析回来。
 
 ### 前端
 
-- [`apps/web/src/components/TaskDetail.tsx`](<D:/code_helper/apps/web/src/components/TaskDetail.tsx:81>)：任务详情页的总控，拉任务详情、订阅 SSE、更新界面。
-- [`apps/web/src/components/BranchComparisonPanel.tsx`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:294>)：分支对比面板，展示每一轮的多个候选分支和最终选中分支。
-- [`apps/web/src/components/CollaborationPanel.tsx`](<D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32>)：协作事件流，展示 planner / executor / reviewer 的交接过程。
-- [`apps/web/src/components/TaskTimeline.tsx`](<D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30>)：完整事件时间线。
-- [`apps/web/src/components/LogPanel.tsx`](<D:/code_helper/apps/web/src/components/LogPanel.tsx:3>)：测试输出、错误日志。
-- [`apps/web/src/api/client.ts`](<D:/code_helper/apps/web/src/api/client.ts:3>)：前端调用后端 API 的统一入口。
+- [任务详情页](<../apps/web/src/components/TaskDetail.tsx#L140>)：总控页面。
+- [分支对比面板](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)：展示多 Agent 比较结果。
+- [协作面板](<../apps/web/src/components/CollaborationPanel.tsx#L32>)：展示 planner / executor / reviewer / coordinator 的交接。
+- [时间线](<../apps/web/src/components/TaskTimeline.tsx#L30>)：完整事件流。
+- [产物面板](<../apps/web/src/components/ArtifactPanel.tsx#L1>)：看 diff、测试报告、分支比较摘要。
 
-## 3. 关键数据对象是什么
+## 3. 当前阶段做到哪里了
+
+现在已经不是单纯的 demo 了，已经能形成一个受控闭环：
+
+- 能读代码
+- 能找问题
+- 能改代码
+- 能跑测试
+- 能回看 diff
+- 能保存总结和记忆
+- 能生成分支比较摘要
+- 能回滚
+
+也就是说，第一层到第五层都已经有落地，只是“通用 agent”的自治能力还有限，仍然偏任务驱动。
+
+## 4. 关键数据对象
 
 这些对象决定了系统里“任务是什么、事件是什么、产物是什么”。
 
 ### `Task`
 
-任务本体，包含:
-
-- 标题、描述
-- 仓库路径
-- 当前状态
-- 当前步骤
-- 最新 diff
-- 最新测试结果
-- 最新检索结果
-- 任务总结
+任务本体，包含标题、描述、仓库路径、状态、当前步骤、最新 diff、测试结果、检索结果和总结。
 
 ### `Step`
 
-表示任务运行到哪一步了:
+表示任务运行到哪一步：
 
 - `read`：读代码
 - `analyze`：分析和规划
@@ -75,58 +81,57 @@
 
 ### `Event`
 
-事件就是“过程记录”。比如:
+事件就是过程记录，比如：
 
 - 读了哪个文件
-- 哪个 Agent 开始工作了
+- 哪个 Agent 开始工作
 - 生成了哪个分支
 - 应用了哪个 patch
 - 测试是否通过
+- 分支比较结果是什么
 
 ### `Artifact`
 
-产物，比如:
+产物比如：
 
-- diff
-- 测试报告
-- 日志
-- 截图
+- `diff`
+- `test_report`
+- `branch_comparison`
 
 ### `Snapshot`
 
-快照就是“改代码前的备份”。回滚的时候会恢复它。
+快照就是改代码前的备份，回滚时会恢复它。
 
 ### `Memory`
 
-长期记忆，记录历史任务的结论、修复经验、相关文件。
+长期记忆，用来保存历史任务的结论、经验和相关文件。
 
-## 4. 配置文件在干什么
+## 5. LLM 配置在哪
 
-真正的大模型配置在:
+默认从 [Settings](<../apps/api/core/config.py#L16>) 读取：
 
-- [`config/llm_config.json`](<D:/code_helper/config/llm_config.json:1>)
+- `config/llm_config.json`
+- 或环境变量 `APP_LLM_CONFIG_PATH`
 
-示例内容:
+配置示例：
 
 ```json
 {
   "provider": "openai",
   "base_url": "https://api.openai.com/v1",
   "api_key_env": "OPENAI_API_KEY",
-  "model": "gpt-5.1",
+  "model": "your-model-name",
   "temperature": 0.2,
   "max_output_tokens": 2048,
   "timeout_seconds": 120
 }
 ```
 
-如果这里没填好，系统仍然能跑，但会退回到启发式逻辑，不走真正的 LLM 推理。
+如果没配好，系统会自动退回启发式逻辑，不会真的调用模型。
 
-## 5. 后端入口文件做什么
+## 6. 后端入口在做什么
 
-[`apps/api/main.py`](<D:/code_helper/apps/api/main.py:17>)
-
-它做了几件事:
+[ `apps/api/main.py`](<../apps/api/main.py#L17>) 做了这些事：
 
 1. 读取配置
 2. 创建 FastAPI 应用
@@ -134,300 +139,191 @@
 4. 启动时初始化数据库、事件服务、回滚服务、任务服务
 5. 注册路由
 
-关键逻辑:
+## 7. 任务闭环怎么跑
 
-```python
-settings = get_settings()
-store = SQLiteStore(settings.database_path)
-events = EventService(store)
-rollback_service = RollbackService(store, events)
-task_service = TaskService(...)
-```
+[ `TaskService`](<../apps/api/services/task_service.py#L28>) 是整个系统最核心的后端文件。
 
-这段代码的意思是:
-
-- 先准备数据库
-- 再准备事件系统
-- 再准备回滚能力
-- 最后把这些能力交给任务服务统一调度
-
-## 6. 任务是怎么跑起来的
-
-[`apps/api/services/task_service.py`](<D:/code_helper/apps/api/services/task_service.py:28>)
-
-这是整个系统最核心的后端文件。
-
-它负责:
+它负责：
 
 1. 创建任务
-2. 运行任务
-3. 把任务状态推进到下一步
-4. 把 Agent 过程记录进数据库
-5. 保存 diff、测试报告、记忆
-6. 遇到失败时把任务标成失败
+2. 启动任务
+3. 推进状态
+4. 记录事件
+5. 保存 diff、测试报告、记忆和分支比较摘要
+6. 标记成功或失败
 
-### 关键代码链接
+### 关键代码
 
-- [任务服务类 `TaskService`](<D:/code_helper/apps/api/services/task_service.py:28>)
-- [创建任务 `create_task`](<D:/code_helper/apps/api/services/task_service.py:43>)
-- [运行入口 `run_task`](<D:/code_helper/apps/api/services/task_service.py:60>)
-- [执行闭环 `_execute`](<D:/code_helper/apps/api/services/task_service.py:74>)
-- [状态推进 `_transition`](<D:/code_helper/apps/api/services/task_service.py:240>)
-- [进度映射 `_apply_progress_event`](<D:/code_helper/apps/api/services/task_service.py:279>)
+- [创建任务 `create_task`](<../apps/api/services/task_service.py#L43>)
+- [启动任务 `run_task`](<../apps/api/services/task_service.py#L60>)
+- [执行闭环 `_execute`](<../apps/api/services/task_service.py#L74>)
+- [状态推进 `_transition`](<../apps/api/services/task_service.py#L253>)
+- [事件映射 `_apply_progress_event`](<../apps/api/services/task_service.py#L292>)
 
-### 它为什么重要
+### 这里最重要的一点
 
-因为真正的“任务闭环”不在前端，也不在 LLM，而在这里。
+真正的任务闭环不在前端，也不在 LLM，而是在 `TaskService` 里把整个过程串起来。
 
-### 关键流程
+## 8. Agent 的“脑子”在哪里
 
-#### 1）创建任务
+[ `OpenAIPlanner`](<../packages/agent-core/src/agent_core/llm.py#L65>) 负责把任务状态发给模型，再把模型输出解析成结构化结果。
 
-`create_task()` 会把标题、描述、仓库路径写进数据库，生成一个新的任务记录。
+它主要做三件事：
 
-#### 2）运行任务
+1. 规划补丁
+2. 规划下一步
+3. 审查结果
 
-`run_task()` 会:
+### 关键代码
 
-- 检查任务是否已经在跑
-- 把任务状态改成 `queued`
-- 异步启动 `_execute()`
+- [补丁提议 `propose_patch`](<../packages/agent-core/src/agent_core/llm.py#L73>)
+- [下一步规划 `plan_next_step`](<../packages/agent-core/src/agent_core/llm.py#L137>)
+- [结果审查 `review_result`](<../packages/agent-core/src/agent_core/llm.py#L189>)
 
-这意味着 API 返回很快，但真正干活是在后台线程里继续跑。
+## 9. 真正的工作流在哪里
 
-#### 3）执行任务
+[ `DemoWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>) 是主工作流。
 
-`_execute()` 做的是完整闭环:
-
-- 先加载历史记忆
-- 再创建 `DemoWorkflow`
-- 让 workflow 跑起来
-- 保存 snapshot、diff、test report
-- 写入 memory
-- 根据测试和审查结果决定 `succeeded` 还是 `failed`
-
-## 7. Agent 的“脑子”在哪里
-
-[`packages/agent-core/src/agent_core/llm.py`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:44>)
-
-这里是 LLM 接口层。
-
-它主要做三件事:
-
-1. 发起模型请求
-2. 让模型按 JSON 格式输出
-3. 把模型回复解析成结构化对象
-
-### 关键代码链接
-
-- [LLM 主类 `OpenAIPlanner`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:44>)
-- [补丁提议 `propose_patch`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:73>)
-- [下一步规划 `plan_next_step`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:137>)
-- [结果审查 `review_result`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:189>)
-- [Responses API 调用 `_invoke_responses_api`](<D:/code_helper/packages/agent-core/src/agent_core/llm.py:230>)
-
-## 8. 真正的工作流在哪里
-
-[`packages/agent-core/src/agent_core/workflow/pipeline.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:59>)
-
-这个文件是 Agent 的主循环。
-
-它把一个任务拆成这些阶段:
+它做的是：
 
 1. 检索相关代码
 2. 读取上下文文件
 3. 跑 baseline 测试
 4. 进入协作循环
-5. 生成总结
+5. 汇总结果
 
-### 关键代码链接
+### 关键代码
 
-- [工作流主类 `DemoWorkflow`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:59>)
-- [工作流入口 `run`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:76>)
-- [协作循环 `_run_collaborative_loop`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:193>)
-- [LLM 规划 `_plan_react_decision`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:528>)
-- [LLM 审查 `_review_react_decision`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:612>)
-- [状态构造 `_build_react_state`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:782>)
-- [分支计数 `_count_explored_branches`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:815>)
-- [文件读取 `_read_requested_files`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:825>)
-- [patch 解析 `_resolve_react_proposal`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:837>)
-- [测试执行 `_run_tests`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:967>)
+- [工作流入口 `run`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L81>)
+- [协作循环 `_run_collaborative_loop`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L335>)
+- [状态构造 `_build_react_state`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L941>)
+- [分支比较 `_build_branch_comparison`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L984>)
+- [测试执行 `_run_tests`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1233>)
 
-## 9. 多 Agent 并行协作是怎么实现的
+## 10. 多 Agent 协作现在怎么做
 
-[`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:1>)
+[ `choose_parallel_branch`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>) 现在每轮会同时生成 5 个候选角色：
 
-这部分实现了“同一轮里多个角色同时提方案”。
+- `planner`：平衡型，倾向最小安全修改
+- `critic`：保守型，宁可多读上下文
+- `memory`：记忆型，参考历史经验
+- `explorer`：扩展搜索范围
+- `verifier`：验证型，优先看测试和收尾
 
-当前有 3 个角色:
+然后系统会：
 
-- `planner`：偏平衡，负责小而稳的修复
-- `critic`：偏保守，宁可多看一点上下文
-- `memory`：会参考历史记忆和已有经验
+1. 并行生成候选
+2. 给每个候选打分
+3. 选出最优分支
+4. 写入 `branch.selected`
+5. 最终写出 `branch.comparison.completed`
 
-### 关键代码链接
+### 关键代码
 
-- [并行入口 `choose_parallel_branch`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:33>)
-- [分支生成 `_build_candidate`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:143>)
-- [分支回退 `_fallback_branch_decision`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:253>)
-- [分支打分 `_score_candidate`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:329>)
+- [并行入口 `choose_parallel_branch`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
+- [分支构建 `_build_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L153>)
+- [分支回退 `_fallback_branch_decision`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L263>)
+- [分支打分 `_score_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L394>)
 
-## 10. 回滚是怎么做的
+## 11. 分支比较结果是什么
 
-[`apps/api/services/rollback_service.py`](<D:/code_helper/apps/api/services/rollback_service.py:14>)
+现在不仅有事件流，还有一个正式的比较摘要 artifact。
 
-它的职责很简单:
+在 [pipeline.py](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L656>) 里，工作流会把 branch 历史整理成一份结构化结果，然后发出：
 
-1. 找到最近快照
-2. 发出 `rollback.started`
-3. 把工作区恢复到快照
-4. 更新任务状态为 `rolled_back`
-5. 发出 `rollback.completed`
+- `branch.comparison.completed`
 
-### 关键代码链接
+同时在 [TaskService](<../apps/api/services/task_service.py#L184>) 里保存成：
 
-- [回滚服务类 `RollbackService`](<D:/code_helper/apps/api/services/rollback_service.py:14>)
-- [回滚入口 `rollback`](<D:/code_helper/apps/api/services/rollback_service.py:19>)
+- `type = branch_comparison`
 
-## 11. 事件是怎么实时推到前端的
+这意味着前端不仅能看到“谁赢了”，还能看到：
 
-[`apps/api/services/event_service.py`](<D:/code_helper/apps/api/services/event_service.py:14>)
+- 总共比较了几轮
+- 一共多少候选
+- 最后谁赢了
+- 最终测试结果
+- 高亮结论
 
-它做两件事:
+## 12. 回滚怎么做
+
+[ `RollbackService`](<../apps/api/services/rollback_service.py#L14>) 负责：
+
+1. 找最近快照
+2. 验证快照是否未被篡改
+3. 恢复工作区
+4. 更新任务状态
+5. 发出回滚事件
+
+### 关键代码
+
+- [回滚入口 `rollback`](<../apps/api/services/rollback_service.py#L19>)
+
+## 13. 事件怎么推到前端
+
+[ `EventService`](<../apps/api/services/event_service.py#L14>) 做两件事：
 
 1. 把事件写入数据库
-2. 把事件实时广播给正在监听的前端
+2. 把事件实时广播给前端
 
-[`apps/api/api/routes/events.py`](<D:/code_helper/apps/api/api/routes/events.py:9>)
+[ `events` 路由](<../apps/api/api/routes/events.py#L9>) 提供 SSE，前端可以边跑边看。
 
-这个路由提供 SSE:
+## 14. 数据怎么存
 
-- 前端可以订阅任务事件流
-- 后端会把历史事件先发一遍
-- 然后继续推实时事件
+[ `SQLiteStore`](<../apps/api/storage/sqlite.py#L95>) 负责建表和 CRUD。
 
-## 12. 数据是怎么存的
+它会保存：
 
-[`apps/api/storage/sqlite.py`](<D:/code_helper/apps/api/storage/sqlite.py:95>)
+- tasks
+- task_events
+- task_snapshots
+- task_artifacts
+- task_memory
+- task_subgoals
 
-这是数据库仓库层。
+### 关键代码
 
-它负责:
+- [初始化数据库 `initialize`](<../apps/api/storage/sqlite.py#L124>)
+- [创建任务 `create_task`](<../apps/api/storage/sqlite.py#L131>)
+- [任务详情 `get_task_detail`](<../apps/api/storage/sqlite.py#L183>)
+- [写入事件 `append_event`](<../apps/api/storage/sqlite.py#L227>)
+- [保存快照 `create_snapshot`](<../apps/api/storage/sqlite.py#L262>)
+- [保存产物 `create_artifact`](<../apps/api/storage/sqlite.py#L272>)
+- [保存记忆 `create_memory`](<../apps/api/storage/sqlite.py#L300>)
+- [搜索记忆 `search_memory`](<../apps/api/storage/sqlite.py#L376>)
 
-- 建表
-- 插入任务
-- 插入事件
-- 插入快照
-- 插入产物
-- 插入记忆
-- 查任务详情
-- 查事件
-- 查最新快照
+## 15. 前端怎么显示这些东西
 
-### 关键代码链接
+[ `TaskDetailPanel`](<../apps/web/src/components/TaskDetail.tsx#L140>) 是页面总控。
 
-- [SQLite 仓库 `SQLiteStore`](<D:/code_helper/apps/api/storage/sqlite.py:95>)
-- [初始化数据库 `initialize`](<D:/code_helper/apps/api/storage/sqlite.py:100>)
-- [创建任务 `create_task`](<D:/code_helper/apps/api/storage/sqlite.py:107>)
-- [写入事件 `append_event`](<D:/code_helper/apps/api/storage/sqlite.py:198>)
-- [保存快照 `create_snapshot`](<D:/code_helper/apps/api/storage/sqlite.py:234>)
-- [保存产物 `create_artifact`](<D:/code_helper/apps/api/storage/sqlite.py:244>)
-- [保存记忆 `create_memory`](<D:/code_helper/apps/api/storage/sqlite.py:280>)
-- [搜索记忆 `search_memory`](<D:/code_helper/apps/api/storage/sqlite.py:333>)
-- [列出快照 `list_snapshots`](<D:/code_helper/apps/api/storage/sqlite.py:345>)
-- [最新快照 `get_latest_snapshot`](<D:/code_helper/apps/api/storage/sqlite.py:353>)
-
-## 13. 前端是怎么显示这些东西的
-
-[`apps/web/src/api/client.ts`](<D:/code_helper/apps/web/src/api/client.ts:3>)
-
-这是前端访问后端的统一入口。
-
-它封装了:
-
-- 列表任务
-- 看任务详情
-- 创建任务
-- 运行任务
-- 回滚任务
-- 看 artifacts
-- 订阅事件流
-
-[`apps/web/src/components/TaskDetail.tsx`](<D:/code_helper/apps/web/src/components/TaskDetail.tsx:81>)
-
-这是页面总控。
-
-它会:
+它会：
 
 1. 加载任务详情
 2. 加载 artifacts
-3. 读取安全策略
+3. 拉安全策略
 4. 订阅 SSE
-5. 来新事件就更新界面
+5. 有新事件就刷新界面
 
-### 关键代码链接
+### 关键代码
 
-- [任务详情页总控 `TaskDetailPanel`](<D:/code_helper/apps/web/src/components/TaskDetail.tsx:81>)
-- [事件同步 `applyEvent`](<D:/code_helper/apps/web/src/components/TaskDetail.tsx:19>)
+- [事件合并 `applyEvent`](<../apps/web/src/components/TaskDetail.tsx#L19>)
+- [总控组件 `TaskDetailPanel`](<../apps/web/src/components/TaskDetail.tsx#L140>)
 
-[`apps/web/src/components/BranchComparisonPanel.tsx`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:294>)
+[ `BranchComparisonPanel`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>) 是第五阶段最关键的可视化。
 
-这是并行多 Agent 的可视化核心。
+它会把每轮候选分支、选中分支、比较摘要一起展示出来。
 
-它会按 turn 分组，把每轮的多个候选分支放在一起，显示:
+[ `CollaborationPanel`](<../apps/web/src/components/CollaborationPanel.tsx#L32>) 会把 branch comparison 也纳入协作事件流。
 
-- 谁提出了方案
-- 方案动作是什么
-- 要读哪些文件
-- 改了哪些文件
-- 测试结果
-- 审查结果
-- 哪个分支被选中
+[ `ArtifactPanel`](<../apps/web/src/components/ArtifactPanel.tsx#L1>) 会展示：
 
-### 关键代码链接
+- diff
+- 测试报告
+- branch comparison summary
 
-- [分支对比 `BranchComparisonPanel`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:294>)
-- [分支分组 `buildTurns`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:128>)
-- [分支差异 `describeDelta`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:248>)
+## 16. API 接口
 
-[`apps/web/src/components/CollaborationPanel.tsx`](<D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32>)
-
-把和 Agent 协作相关的事件聚合起来，比如:
-
-- planner 开始了
-- executor 开始了
-- reviewer 完成了
-- branch 被选中或被回滚了
-
-### 关键代码链接
-
-- [协作面板 `CollaborationPanel`](<D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:32>)
-- [角色映射 `getRole`](<D:/code_helper/apps/web/src/components/CollaborationPanel.tsx:3>)
-
-[`apps/web/src/components/TaskTimeline.tsx`](<D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30>)
-
-把所有事件按时间列出来，像“流水账”一样展示整个 Agent 过程。
-
-### 关键代码链接
-
-- [时间线 `TaskTimeline`](<D:/code_helper/apps/web/src/components/TaskTimeline.tsx:30>)
-- [事件摘要 `summarizePayload`](<D:/code_helper/apps/web/src/components/TaskTimeline.tsx:3>)
-
-[`apps/web/src/components/LogPanel.tsx`](<D:/code_helper/apps/web/src/components/LogPanel.tsx:3>)
-
-显示最后一次测试的:
-
-- 命令
-- 成功失败
-- 退出码
-- stdout
-- stderr
-
-## 14. 路由接口在做什么
-
-[`apps/api/api/routes/tasks.py`](<D:/code_helper/apps/api/api/routes/tasks.py:12>)
-
-提供这些接口:
+[ `tasks` 路由](<../apps/api/api/routes/tasks.py#L12>) 提供：
 
 - `POST /tasks`
 - `GET /tasks`
@@ -436,76 +332,69 @@ task_service = TaskService(...)
 - `POST /tasks/{id}/rollback`
 - `GET /tasks/{id}/artifacts`
 
-它只是“转发入口”，真正逻辑在 `TaskService`。
+[ `security` 路由](<../apps/api/api/routes/security.py#L10>) 会返回当前安全策略。
 
-### 关键代码链接
+## 17. 现在这个系统能实现什么
 
-- [任务路由 `tasks`](<D:/code_helper/apps/api/api/routes/tasks.py:12>)
-- [创建任务接口](<D:/code_helper/apps/api/api/routes/tasks.py:15>)
-- [任务列表接口](<D:/code_helper/apps/api/api/routes/tasks.py:20>)
-- [运行任务接口](<D:/code_helper/apps/api/api/routes/tasks.py:33>)
-- [回滚任务接口](<D:/code_helper/apps/api/api/routes/tasks.py:41>)
-- [产物列表接口](<D:/code_helper/apps/api/api/routes/tasks.py:51>)
+现在它已经可以：
 
-[`apps/api/api/routes/events.py`](<D:/code_helper/apps/api/api/routes/events.py:9>)
-
-提供任务事件流 SSE。
-
-[`apps/api/api/routes/security.py`](<D:/code_helper/apps/api/api/routes/security.py:10>)
-
-返回当前安全策略，比如:
-
-- 工作区路径
-- 快照路径
-- 命令白名单
-
-## 15. 一次完整任务的运行顺序
-
-如果你点一次“Run task”，大致会发生:
-
-1. API 收到请求
-2. TaskService 把任务标记为运行中
-3. workflow 先检索相关文件
-4. workflow 读取上下文
-5. 跑 baseline 测试
-6. 并行发起多个 Planner 分支
-7. 选中一个最优分支
-8. 执行 patch
-9. 再跑测试
-10. reviewer 判断
-11. 成功则保存总结和记忆
-12. 失败则标记失败，必要时可回滚
-
-## 16. 现在这个系统能做什么
-
-现在它已经能:
-
-- 读任务
+- 接任务
 - 找代码
 - 读上下文
 - 调 LLM 做规划
 - 并行比较多个分支
-- 应用补丁
+- 生成 patch
 - 跑测试
-- 生成 diff 和测试报告
+- 保存 diff、测试报告和分支比较摘要
 - 记录事件流
+- 保存长期记忆
 - 回滚到快照
-- 前端实时展示协作过程
+- 前端实时看全过程
 
-## 17. 给新手的阅读顺序
+## 18. 小白最推荐的阅读顺序
 
-如果你想按最省力的方式看代码，建议顺序是:
+1. [ `docs/architecture.md`](<../docs/architecture.md#L1>)
+2. [ `docs/technical_guide.md`](<../docs/technical_guide.md#L1>)
+3. [ `apps/api/main.py`](<../apps/api/main.py#L17>)
+4. [ `apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L28>)
+5. [ `packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
+6. [ `packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
+7. [ `apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L140>)
+8. [ `apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)
 
-1. [`docs/architecture.md`](<D:/code_helper/docs/architecture.md:1>)
-2. [`docs/technical_guide.md`](<D:/code_helper/docs/technical_guide.md:1>)
-3. [`apps/api/main.py`](<D:/code_helper/apps/api/main.py:17>)
-4. [`apps/api/services/task_service.py`](<D:/code_helper/apps/api/services/task_service.py:28>)
-5. [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/pipeline.py:59>)
-6. [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<D:/code_helper/packages/agent-core/src/agent_core/workflow/parallel_branches.py:33>)
-7. [`apps/web/src/components/TaskDetail.tsx`](<D:/code_helper/apps/web/src/components/TaskDetail.tsx:81>)
-8. [`apps/web/src/components/BranchComparisonPanel.tsx`](<D:/code_helper/apps/web/src/components/BranchComparisonPanel.tsx:294>)
+## 19. 锚点索引
 
-## 18. 最后一句话
+如果你的编辑器不认本地文件行号链接，就直接在代码里搜索这些 `DOC_ANCHOR`：
 
-这个项目的核心，不是“会聊天”，而是“会把任务真正做完”。
+- `task_service.create_task` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L43>)
+- `task_service.execute_loop` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L75>)
+- `task_service.branch_comparison_artifact` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L187>)
+- `task_service.progress_mapper` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L296>)
+- `task_service.transition` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L256>)
+- `workflow.demo` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
+- `workflow.run` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L82>)
+- `workflow.collaborative_loop` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L337>)
+- `workflow.branch_comparison` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L987>)
+- `workflow.run_tests` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1237>)
+- `parallel_branches.choose` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
+- `parallel_branches.build_candidate` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L153>)
+- `parallel_branches.fallback` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L263>)
+- `parallel_branches.score` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L394>)
+- `task_detail.apply_event` -> [`apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L19>)
+- `task_detail.panel` -> [`apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L141>)
+- `branch_comparison.build_view` -> [`apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L147>)
+- `branch_comparison.panel` -> [`apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)
+- `collaboration.role_map` -> [`apps/web/src/components/CollaborationPanel.tsx`](<../apps/web/src/components/CollaborationPanel.tsx#L3>)
+- `collaboration.panel` -> [`apps/web/src/components/CollaborationPanel.tsx`](<../apps/web/src/components/CollaborationPanel.tsx#L32>)
+- `artifact.format` -> [`apps/web/src/components/ArtifactPanel.tsx`](<../apps/web/src/components/ArtifactPanel.tsx#L1>)
+- `artifact.panel` -> [`apps/web/src/components/ArtifactPanel.tsx`](<../apps/web/src/components/ArtifactPanel.tsx#L1>)
+- `tools.run_command` -> [`packages/tools/src/assistant_tools/security.py`](<../packages/tools/src/assistant_tools/security.py#L73>)
+- `tools.safe_environment` -> [`packages/tools/src/assistant_tools/security.py`](<../packages/tools/src/assistant_tools/security.py#L189>)
+
+## 20. 最后一句话
+
+这个项目的核心不是“会聊天”，而是“会把任务真正做完”。
+
 Agent 的脑子在 LLM，手脚在工具，记忆在数据库，眼睛在事件流，保险丝在快照回滚。
+
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
@@ -31,6 +31,7 @@ class ParallelBranchSelection:
 
 
 async def choose_parallel_branch(
+    # DOC_ANCHOR: parallel_branches.choose
     workflow: Any,
     *,
     turn: int,
@@ -61,6 +62,16 @@ async def choose_parallel_branch(
             'agent': 'memory',
             'profile': 'memory-aware',
             'hint': 'Use prior memory and related files to avoid repeat mistakes.',
+        },
+        {
+            'agent': 'explorer',
+            'profile': 'broad-context',
+            'hint': 'Widen the search when the current branch does not explain the failure.',
+        },
+        {
+            'agent': 'verifier',
+            'profile': 'test-focused',
+            'hint': 'Favor reading tests, validating the fix, and ending only when the state is safe.',
         },
     ]
 
@@ -141,6 +152,7 @@ async def choose_parallel_branch(
 
 
 async def _build_candidate(
+    # DOC_ANCHOR: parallel_branches.build_candidate
     workflow: Any,
     *,
     turn: int,
@@ -251,6 +263,7 @@ async def _build_candidate(
 
 
 def _fallback_branch_decision(
+    # DOC_ANCHOR: parallel_branches.fallback
     workflow: Any,
     *,
     agent: str,
@@ -305,6 +318,61 @@ def _fallback_branch_decision(
             model='heuristic',
         )
 
+    if agent == 'explorer':
+        files = [path for path in discovered if path.startswith('tests/')]
+        if not files:
+            files = [path for path in workflow.focus_paths if Path(path).suffix == '.py']
+        for note in workflow.memory_notes:
+            files.extend(note.related_files)
+        files = workflow._dedupe([item for item in files if item])
+        if not latest_test.passed:
+            return ReActDecision(
+                action='read_more',
+                summary='Explore more surrounding code before patching.',
+                rationale='Explorer branch widens the search to avoid a premature fix.',
+                files_to_read=files[:4],
+                provider='heuristic',
+                model='heuristic',
+            )
+        proposal = workflow._infer_patch(discovered, latest_test)
+        if proposal is not None:
+            return ReActDecision(
+                action='patch',
+                summary='Apply the fix after confirming the wider context.',
+                rationale='Explorer branch found enough surrounding evidence for a patch.',
+                proposal=proposal,
+                provider='heuristic',
+                model='heuristic',
+            )
+        return ReActDecision(
+            action='finish',
+            summary=workflow._summarize_outcome(latest_test, []),
+            rationale='Explorer branch found no additional risky change.',
+            provider='heuristic',
+            model='heuristic',
+        )
+
+    if agent == 'verifier':
+        files = [path for path in discovered if path.startswith('tests/')]
+        if not files:
+            files = [path for path in workflow.focus_paths if Path(path).suffix == '.py']
+        if latest_test.passed:
+            return ReActDecision(
+                action='finish',
+                summary=workflow._summarize_outcome(latest_test, []),
+                rationale='Verifier branch accepts the current passing state.',
+                provider='heuristic',
+                model='heuristic',
+            )
+        return ReActDecision(
+            action='read_more',
+            summary='Read tests and verification surfaces before committing to a patch.',
+            rationale='Verifier branch is focused on validation evidence.',
+            files_to_read=files[:4],
+            provider='heuristic',
+            model='heuristic',
+        )
+
     if not patch_applied or not latest_test.passed:
         proposal = workflow._infer_patch(discovered, latest_test)
         if proposal is not None:
@@ -327,6 +395,7 @@ def _fallback_branch_decision(
 
 
 def _score_candidate(
+    # DOC_ANCHOR: parallel_branches.score
     workflow: Any,
     candidate: BranchCandidate,
     *,
@@ -354,9 +423,17 @@ def _score_candidate(
         score += 1.0
     elif candidate.agent == 'critic':
         score += 0.75 if not latest_test.passed else 0.25
+    elif candidate.agent == 'explorer':
+        score += 0.85 if decision.action == 'read_more' else 0.4
+    elif candidate.agent == 'verifier':
+        score += 1.0 if decision.action == 'finish' and latest_test.passed else 0.65 if decision.action == 'read_more' and not latest_test.passed else 0.3
     if candidate.profile == 'conservative' and decision.action == 'read_more':
         score += 1.5
     if candidate.profile == 'memory-aware' and decision.proposal is not None:
+        score += 1.0
+    if candidate.profile == 'broad-context' and decision.files_to_read:
+        score += 0.75
+    if candidate.profile == 'test-focused' and any(path.startswith('tests/') for path in decision.files_to_read):
         score += 1.0
     if patch_applied and decision.action == 'patch':
         score -= 1.0
@@ -367,3 +444,6 @@ def _score_candidate(
     if any('upper()' in text for text in discovered.values()) and decision.action == 'patch':
         score += 0.5
     return round(score, 3)
+
+
+

@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from assistant_shared.models import ArtifactRecord, MemoryRecord, PatchArtifact, RetrievalHit, SnapshotRecord, TaskCreateRequest, TaskDetail, TaskEventModel, TaskStatus, TaskSummary, TestOutcome
+from assistant_shared.models import ArtifactRecord, MemoryRecord, PatchArtifact, RetrievalHit, SnapshotRecord, SubgoalStatus, TaskCreateRequest, TaskDetail, TaskEventModel, TaskStatus, TaskSubgoalRecord, TaskSummary, TestOutcome
 from assistant_telemetry.events import new_event
 
-from apps.api.storage.repositories import encode_json, row_to_artifact, row_to_detail, row_to_event, row_to_memory, row_to_snapshot, row_to_summary
+from apps.api.storage.repositories import encode_json, row_to_artifact, row_to_detail, row_to_event, row_to_memory, row_to_snapshot, row_to_subgoal, row_to_summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -89,6 +89,30 @@ CREATE INDEX IF NOT EXISTS idx_task_memory_task_created_at
 
 CREATE INDEX IF NOT EXISTS idx_task_memory_created_at
     ON task_memory(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_subgoals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subgoal_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    success_criteria TEXT NOT NULL DEFAULT '[]',
+    files_to_read TEXT NOT NULL DEFAULT '[]',
+    rationale TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY(task_id) REFERENCES tasks(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_subgoals_task_position
+    ON task_subgoals(task_id, position);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_subgoals_task_subgoal
+    ON task_subgoals(task_id, subgoal_id);
 """
 
 
@@ -173,7 +197,11 @@ class SQLiteStore:
                 "SELECT * FROM task_memory WHERE task_id = ? ORDER BY created_at DESC, id DESC",
                 (task_id,),
             ).fetchall()]
-            return row_to_detail(dict(row), events=events, snapshots=snapshots, memory=memory)
+            subgoals = [row_to_subgoal(dict(subgoal_row)) for subgoal_row in connection.execute(
+                "SELECT * FROM task_subgoals WHERE task_id = ? ORDER BY position ASC, id ASC",
+                (task_id,),
+            ).fetchall()]
+            return row_to_detail(dict(row), events=events, snapshots=snapshots, memory=memory, subgoals=subgoals)
 
     def update_task(self, task_id: str, **fields) -> TaskSummary:
         if not fields:
@@ -319,6 +347,73 @@ class SQLiteStore:
             created_at=datetime.fromisoformat(created_at),
         )
 
+    def replace_subgoals(self, task_id: str, subgoals: list[dict[str, Any]]) -> list[TaskSubgoalRecord]:
+        records: list[TaskSubgoalRecord] = []
+        with self._write_connection() as connection:
+            connection.execute("DELETE FROM task_subgoals WHERE task_id = ?", (task_id,))
+            for position, subgoal in enumerate(subgoals):
+                payload = dict(subgoal)
+                payload["task_id"] = task_id
+                payload["position"] = int(payload.get("position", position))
+                payload["subgoal_id"] = str(payload.get("subgoal_id") or uuid4())
+                payload["status"] = payload.get("status") or SubgoalStatus.planned.value
+                record = TaskSubgoalRecord.model_validate(payload)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO task_subgoals (
+                        subgoal_id, task_id, position, phase, title, description,
+                        success_criteria, files_to_read, rationale, status,
+                        created_at, updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.subgoal_id,
+                        record.task_id,
+                        record.position,
+                        record.phase,
+                        record.title,
+                        record.description,
+                        encode_json(record.success_criteria) or "[]",
+                        encode_json(record.files_to_read) or "[]",
+                        record.rationale,
+                        record.status.value,
+                        record.created_at.isoformat(),
+                        record.updated_at.isoformat(),
+                        record.completed_at.isoformat() if record.completed_at else None,
+                    ),
+                )
+                records.append(record.model_copy(update={"id": cursor.lastrowid}))
+        return records
+
+    def list_subgoals(self, task_id: str) -> list[TaskSubgoalRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM task_subgoals WHERE task_id = ? ORDER BY position ASC, id ASC",
+                (task_id,),
+            ).fetchall()
+            return [row_to_subgoal(dict(row)) for row in rows]
+
+    def update_subgoal(self, task_id: str, subgoal_id: str, **fields) -> TaskSubgoalRecord | None:
+        if not fields:
+            subgoals = self.list_subgoals(task_id)
+            return next((subgoal for subgoal in subgoals if subgoal.subgoal_id == subgoal_id), None)
+        updates = []
+        values = []
+        for key, value in fields.items():
+            updates.append(f"{key} = ?")
+            values.append(self._normalize_value(value))
+        updates.append("updated_at = ?")
+        values.append(datetime.utcnow().isoformat())
+        values.extend([task_id, subgoal_id])
+        with self._write_connection() as connection:
+            cursor = connection.execute(
+                f"UPDATE task_subgoals SET {', '.join(updates)} WHERE task_id = ? AND subgoal_id = ?",
+                values,
+            )
+            if cursor.rowcount == 0:
+                return None
+        return next((subgoal for subgoal in self.list_subgoals(task_id) if subgoal.subgoal_id == subgoal_id), None)
+
     def list_memory(self, task_id: str | None = None) -> list[MemoryRecord]:
         query = "SELECT * FROM task_memory"
         params: tuple[object, ...] = ()
@@ -376,7 +471,7 @@ class SQLiteStore:
     def _normalize_value(self, value):
         if value is None:
             return None
-        if isinstance(value, (TaskStatus,)):
+        if isinstance(value, (TaskStatus, SubgoalStatus)):
             return value.value
         if hasattr(value, "model_dump"):
             return encode_json(value)
@@ -405,15 +500,52 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _score_memory(memory: MemoryRecord, terms: list[str]) -> float:
-    haystacks = [
-        memory.title.lower(),
-        memory.content.lower(),
-        " ".join(memory.keywords).lower(),
-        " ".join(memory.related_files).lower(),
+    sources = [
+        (memory.title.lower(), 1.8),
+        (memory.content.lower(), 1.0),
+        (' '.join(memory.keywords).lower(), 1.6),
+        (' '.join(memory.related_files).lower(), 1.4),
     ]
     score = 0.0
+    matched_terms = 0
     for term in terms:
-        for haystack in haystacks:
+        hit = False
+        for haystack, weight in sources:
             if term in haystack:
-                score += 1.0
+                score += weight
+                hit = True
+        if hit:
+            matched_terms += 1
+
+    if terms:
+        score += (matched_terms / len(terms)) * 2.0
+
+    title_tokens = set(_tokenize(memory.title))
+    keyword_tokens = set(_tokenize(' '.join(memory.keywords)))
+    file_tokens = set(_tokenize(' '.join(memory.related_files)))
+    content_tokens = set(_tokenize(memory.content[:500]))
+    exact_hits = 0.0
+    for term in terms:
+        if term in title_tokens:
+            exact_hits += 2.0
+        elif term in keyword_tokens:
+            exact_hits += 1.0
+        elif term in file_tokens:
+            exact_hits += 1.0
+        elif term in content_tokens:
+            exact_hits += 0.5
+    score += exact_hits * 0.4
+
+    kind = memory.kind.lower()
+    if kind == 'run_summary':
+        score += 0.4
+    elif kind == 'task_plan':
+        score += 0.8
+    elif kind == 'lesson_success':
+        score += 1.2
+    elif kind == 'lesson_failure':
+        score += 1.4
+
+    age_days = max((datetime.utcnow() - memory.created_at).days, 0)
+    score += max(0.0, 0.8 - (age_days * 0.03))
     return score

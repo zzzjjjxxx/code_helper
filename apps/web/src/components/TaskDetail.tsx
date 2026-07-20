@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 
 import { api } from '../api/client'
-import type { ArtifactRecord, MemoryRecord, RetrievalHit, SecurityPolicy, TaskDetail, TaskEvent, TestOutcome } from '../types'
+import type { ArtifactRecord, MemoryRecord, RetrievalHit, SecurityPolicy, SubgoalStatus, TaskDetail, TaskEvent, TaskSubgoalRecord, TestOutcome } from '../types'
 import { BranchComparisonPanel } from './BranchComparisonPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import { ArtifactPanel } from './ArtifactPanel'
@@ -17,10 +17,63 @@ interface Props {
 }
 
 function applyEvent(detail: TaskDetail, event: TaskEvent): TaskDetail {
+  // DOC_ANCHOR: task_detail.apply_event
   const next: TaskDetail = { ...detail, events: [...detail.events, event] }
+
+  const updateSubgoals = (status: SubgoalStatus, subgoalPayload: Partial<TaskSubgoalRecord>) => {
+    const subgoalId = subgoalPayload.subgoal_id
+    if (!subgoalId) {
+      return
+    }
+    const existing = next.subgoals.find((item) => item.subgoal_id === subgoalId)
+    const merged: TaskSubgoalRecord = {
+      id: existing?.id ?? null,
+      subgoal_id: subgoalId,
+      task_id: detail.id,
+      position: subgoalPayload.position ?? existing?.position ?? 0,
+      phase: subgoalPayload.phase ?? existing?.phase ?? 'analysis',
+      title: subgoalPayload.title ?? existing?.title ?? '',
+      description: subgoalPayload.description ?? existing?.description ?? '',
+      success_criteria: subgoalPayload.success_criteria ?? existing?.success_criteria ?? [],
+      files_to_read: subgoalPayload.files_to_read ?? existing?.files_to_read ?? [],
+      rationale: subgoalPayload.rationale ?? existing?.rationale ?? '',
+      status,
+      created_at: existing?.created_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completed_at: status === 'completed' ? new Date().toISOString() : existing?.completed_at ?? null,
+    }
+    const remaining = next.subgoals.filter((item) => item.subgoal_id !== subgoalId)
+    next.subgoals = [...remaining, merged].sort((a, b) => a.position - b.position)
+  }
 
   if (event.type === 'task.started') {
     next.status = 'reading'
+  }
+
+  if (event.type === 'goal.planned') {
+    const subgoals = (event.payload as { subgoals?: TaskSubgoalRecord[] }).subgoals ?? []
+    next.subgoals = subgoals
+  }
+
+  if (event.type === 'goal.started') {
+    const subgoal = (event.payload as { subgoal?: Partial<TaskSubgoalRecord> }).subgoal
+    if (subgoal) {
+      updateSubgoals('active', subgoal)
+    }
+  }
+
+  if (event.type === 'goal.completed') {
+    const subgoal = (event.payload as { subgoal?: Partial<TaskSubgoalRecord> }).subgoal
+    if (subgoal) {
+      updateSubgoals('completed', subgoal)
+    }
+  }
+
+  if (event.type === 'goal.blocked') {
+    const subgoal = (event.payload as { subgoal?: Partial<TaskSubgoalRecord> }).subgoal
+    if (subgoal) {
+      updateSubgoals('blocked', subgoal)
+    }
   }
 
   if (event.type === 'branch.created' || event.type === 'branch.selected' || event.type === 'agent.planner.started' || event.type === 'agent.planner.completed' || event.type === 'replan.requested') {
@@ -73,12 +126,20 @@ function applyEvent(detail: TaskDetail, event: TaskEvent): TaskDetail {
     next.status = 'rolled_back'
     next.current_step = 'rollback'
     next.summary = event.message
+    next.last_error = null
   }
+
+  if (event.type === 'rollback.failed') {
+    next.current_step = 'rollback'
+    next.last_error = String((event.payload as { error?: unknown }).error ?? event.message)
+  }
+
 
   return next
 }
 
 export function TaskDetailPanel({ taskId, onRefreshTasks, onSelectTask }: Props) {
+  // DOC_ANCHOR: task_detail.panel
   const [task, setTask] = useState<TaskDetail | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([])
   const [policy, setPolicy] = useState<SecurityPolicy | null>(null)
@@ -140,7 +201,7 @@ export function TaskDetailPanel({ taskId, onRefreshTasks, onSelectTask }: Props)
           void loadArtifacts()
         }
 
-        if (event.type === 'task.succeeded' || event.type === 'task.failed' || event.type === 'rollback.completed') {
+        if (event.type === 'task.succeeded' || event.type === 'task.failed' || event.type === 'rollback.completed' || event.type === 'rollback.failed') {
           void onRefreshTasks()
           void loadArtifacts()
         }
@@ -195,6 +256,7 @@ export function TaskDetailPanel({ taskId, onRefreshTasks, onSelectTask }: Props)
               <span className="metric-chip">events {task.events.length}</span>
               <span className="metric-chip">artifacts {artifacts.length}</span>
               <span className="metric-chip">snapshots {task.snapshots.length}</span>
+              <span className="metric-chip">subgoals {task.subgoals.length}</span>
             </div>
           ) : null}
         </div>
@@ -248,6 +310,29 @@ export function TaskDetailPanel({ taskId, onRefreshTasks, onSelectTask }: Props)
                   <li key={path}>{path}</li>
                 ))}
               </ul>
+            </div>
+            <div className="subgoal-list">
+              <span className="muted">Task plan</span>
+              <div className="subgoal-stack">
+                {task.subgoals.length === 0 ? <div className="muted">Plan not ready yet.</div> : null}
+                {task.subgoals.map((subgoal) => (
+                  <article key={subgoal.subgoal_id} className={`subgoal-card subgoal-${subgoal.status}`}>
+                    <div className="subgoal-topline">
+                      <strong>{subgoal.position + 1}. {subgoal.title}</strong>
+                      <span className="subgoal-badge">{subgoal.status}</span>
+                    </div>
+                    <div className="muted">{subgoal.phase}</div>
+                    <p>{subgoal.description}</p>
+                    {subgoal.success_criteria.length > 0 ? (
+                      <ul>
+                        {subgoal.success_criteria.map((criteria) => (
+                          <li key={criteria}>{criteria}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
             </div>
             {policy ? (
               <div className="security-box">
@@ -345,3 +430,5 @@ export function TaskDetailPanel({ taskId, onRefreshTasks, onSelectTask }: Props)
     </div>
   )
 }
+
+

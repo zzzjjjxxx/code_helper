@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from datetime import datetime
@@ -9,9 +9,11 @@ from assistant_shared.models import (
     MemoryRecord,
     RetrievalHit,
     SnapshotRecord,
+    SubgoalStatus,
     TaskDetail,
     TaskEventModel,
     TaskStatus,
+    TaskSubgoalRecord,
     TaskSummary,
     TestOutcome,
 )
@@ -50,6 +52,7 @@ def row_to_detail(
     events: list[TaskEventModel],
     snapshots: list[SnapshotRecord],
     memory: list[MemoryRecord],
+    subgoals: list[TaskSubgoalRecord],
 ) -> TaskDetail:
     latest_test_result_raw = _decode_json(row["latest_test_result"], None)
     latest_test_result = TestOutcome.model_validate(latest_test_result_raw) if latest_test_result_raw else None
@@ -70,6 +73,7 @@ def row_to_detail(
         latest_diff=row["latest_diff"],
         latest_test_result=latest_test_result,
         latest_retrieval=latest_retrieval,
+        subgoals=subgoals,
         snapshots=snapshots,
         memory=memory,
         events=events,
@@ -123,6 +127,25 @@ def row_to_memory(row: dict[str, Any]) -> MemoryRecord:
         keywords=_decode_json(row["keywords"], []),
         related_files=_decode_json(row["related_files"], []),
         created_at=_parse_datetime(row["created_at"]),
+    )
+
+
+def row_to_subgoal(row: dict[str, Any]) -> TaskSubgoalRecord:
+    return TaskSubgoalRecord(
+        id=row["id"],
+        subgoal_id=row["subgoal_id"],
+        task_id=row["task_id"],
+        position=row["position"],
+        phase=row["phase"],
+        title=row["title"],
+        description=row["description"] or "",
+        success_criteria=_decode_json(row["success_criteria"], []),
+        files_to_read=_decode_json(row["files_to_read"], []),
+        rationale=row["rationale"] or "",
+        status=SubgoalStatus(row["status"]),
+        created_at=_parse_datetime(row["created_at"]),
+        updated_at=_parse_datetime(row["updated_at"]),
+        completed_at=_parse_datetime(row["completed_at"]) if row["completed_at"] else None,
     )
 
 

@@ -6,7 +6,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.created: {TaskStatus.queued, TaskStatus.cancelled},
     TaskStatus.queued: {TaskStatus.reading, TaskStatus.failed, TaskStatus.succeeded, TaskStatus.cancelled},
     TaskStatus.reading: {TaskStatus.analyzing, TaskStatus.failed, TaskStatus.succeeded, TaskStatus.cancelled},
-    TaskStatus.analyzing: {TaskStatus.patching, TaskStatus.failed, TaskStatus.succeeded, TaskStatus.cancelled},
+    TaskStatus.analyzing: {TaskStatus.patching, TaskStatus.awaiting_review, TaskStatus.failed, TaskStatus.succeeded, TaskStatus.cancelled},
     TaskStatus.patching: {TaskStatus.testing, TaskStatus.failed, TaskStatus.succeeded, TaskStatus.cancelled},
     TaskStatus.testing: {TaskStatus.awaiting_review, TaskStatus.succeeded, TaskStatus.failed, TaskStatus.cancelled},
     TaskStatus.awaiting_review: {

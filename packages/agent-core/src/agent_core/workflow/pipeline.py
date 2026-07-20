@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable, Mapping
 import sys
@@ -19,7 +20,7 @@ from assistant_tools import (
     write_text_file,
 )
 
-from ..llm import LLMPlanResult, OpenAIPlanner, ReActDecision, ReviewDecision
+from ..llm import LLMPlanResult, OpenAIPlanner, ReActDecision, ReviewDecision, TaskPlanResult, TaskSubgoalSpec
 from .parallel_branches import choose_parallel_branch
 from .patch_model import PatchProposal
 
@@ -39,6 +40,8 @@ class WorkflowResult:
     react_turns: int
     branch_count: int
     review_decision: str
+    subgoal_count: int
+    branch_comparison: dict[str, object]
 
 
 @dataclass(slots=True)
@@ -54,9 +57,12 @@ class ReactLoopResult:
     react_turns: int
     branch_count: int
     review_decision: str
+    subgoal_count: int
+    branch_comparison: dict[str, object]
 
 
 class DemoWorkflow:
+    # DOC_ANCHOR: workflow.demo
     def __init__(
         self,
         workspace_root: str | Path,
@@ -74,6 +80,7 @@ class DemoWorkflow:
         self.memory_notes = memory_notes or []
 
     async def run(
+        # DOC_ANCHOR: workflow.run
         self,
         *,
         task_id: str,
@@ -83,12 +90,18 @@ class DemoWorkflow:
     ) -> WorkflowResult:
         await emit('task.started', TaskStep.read, 'Scanning the demo workspace', {'workspace_root': str(self.workspace_root)})
 
-        retrieval_query = self._build_retrieval_query(task_title, task_description)
+        retrieval_query = self._build_retrieval_query(task_title, task_description, self.memory_notes)
+        memory_hints = self._build_memory_hints(self.memory_notes)
         await emit(
             'retrieval.started',
             TaskStep.read,
             'Searching the workspace for relevant code',
-            {'query': retrieval_query, 'focus_paths': self.focus_paths},
+            {
+                'query': retrieval_query,
+                'focus_paths': self.focus_paths,
+                'memory_note_count': len(self.memory_notes),
+                'memory_hints': memory_hints,
+            },
         )
         retrieval_hits = search_workspace_files(
             self.workspace_root,
@@ -100,10 +113,15 @@ class DemoWorkflow:
             'retrieval.completed',
             TaskStep.read,
             f'Found {len(retrieval_hits)} relevant file(s)',
-            {'query': retrieval_query, 'hits': [hit.model_dump(mode='json') for hit in retrieval_hits]},
+            {
+                'query': retrieval_query,
+                'hits': [hit.model_dump(mode='json') for hit in retrieval_hits],
+                'memory_note_count': len(self.memory_notes),
+                'memory_hints': memory_hints,
+            },
         )
 
-        discovered = self._read_context_files(retrieval_hits)
+        discovered = self._read_context_files(retrieval_hits, self.memory_notes)
         for path, text in discovered.items():
             await emit(
                 'file.read',
@@ -112,7 +130,50 @@ class DemoWorkflow:
                 {'path': path, 'preview': preview_text(text)},
             )
 
+        task_plan = self._build_task_plan(
+            task_title=task_title,
+            task_description=task_description,
+            retrieval_hits=retrieval_hits,
+            discovered=discovered,
+        )
+        planned_goals = task_plan.subgoals[:3]
+        await emit(
+            'goal.planned',
+            TaskStep.analyze,
+            task_plan.summary,
+            {
+                'summary': task_plan.summary,
+                'provider': task_plan.provider,
+                'model': task_plan.model,
+                'subgoals': [self._serialize_subgoal(task_id, subgoal, status='planned') for subgoal in planned_goals],
+            },
+        )
+        first_goal = planned_goals[0] if len(planned_goals) > 0 else None
+        second_goal = planned_goals[1] if len(planned_goals) > 1 else None
+        third_goal = planned_goals[2] if len(planned_goals) > 2 else None
+        if first_goal is not None:
+            await emit(
+                'goal.started',
+                self._goal_event_step(first_goal),
+                f'Started goal: {first_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, first_goal, status='completed')},
+            )
+
         baseline = await self._run_tests(emit=emit, step=TaskStep.analyze, label='baseline')
+        if first_goal is not None:
+            await emit(
+                'goal.completed',
+                self._goal_event_step(first_goal),
+                f'Completed goal: {first_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, first_goal, status='completed')},
+            )
+        if second_goal is not None:
+            await emit(
+                'goal.started',
+                self._goal_event_step(second_goal),
+                f'Started goal: {second_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, second_goal, status='completed')},
+            )
         await emit(
             'test.completed',
             TaskStep.analyze,
@@ -136,6 +197,20 @@ class DemoWorkflow:
             baseline=baseline,
             emit=emit,
         )
+        if second_goal is not None:
+            await emit(
+                'goal.completed',
+                self._goal_event_step(second_goal),
+                f'Completed goal: {second_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, second_goal, status='completed')},
+            )
+        if third_goal is not None:
+            await emit(
+                'goal.started',
+                self._goal_event_step(third_goal),
+                f'Started goal: {third_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, third_goal, status='active')},
+            )
         summary = react.summary
         await emit(
             'task.summarized',
@@ -151,6 +226,13 @@ class DemoWorkflow:
                 'react_turns': react.react_turns,
             },
         )
+        if third_goal is not None:
+            await emit(
+                'goal.completed',
+                self._goal_event_step(third_goal),
+                f'Completed goal: {third_goal.title}',
+                {'subgoal': self._serialize_subgoal(task_id, third_goal, status='completed')},
+            )
 
         return WorkflowResult(
             summary=summary,
@@ -166,18 +248,39 @@ class DemoWorkflow:
             react_turns=react.react_turns,
             branch_count=react.branch_count,
             review_decision=react.review_decision,
+            subgoal_count=len(planned_goals),
+            branch_comparison=react.branch_comparison,
         )
 
-    def _build_retrieval_query(self, title: str, description: str) -> str:
+    def _build_retrieval_query(self, title: str, description: str, memory_notes: list[MemoryRecord]) -> str:
         parts = [title.strip(), description.strip(), ' '.join(self.focus_paths)]
+        parts.extend(self._build_memory_hints(memory_notes))
         return ' '.join(part for part in parts if part)
 
-    def _read_context_files(self, retrieval_hits: list[RetrievalHit]) -> dict[str, str]:
+    def _build_memory_hints(self, memory_notes: list[MemoryRecord]) -> list[str]:
+        hints: list[str] = []
+        for memory in memory_notes[:6]:
+            hints.append(memory.title)
+            hints.append(memory.kind)
+            hints.extend(memory.keywords[:4])
+            hints.extend(memory.related_files[:4])
+            if memory.content:
+                hints.append(' '.join(self._tokenize(memory.content)[:6]))
+        return self._dedupe(hints)
+
+    def _read_context_files(self, retrieval_hits: list[RetrievalHit], memory_notes: list[MemoryRecord]) -> dict[str, str]:
         contents: dict[str, str] = {}
         for relative_path in self.focus_paths:
             file_path = self.workspace_root / relative_path
             if file_path.exists():
                 contents[relative_path] = read_text_file(file_path)
+        for memory in memory_notes:
+            for related_path in memory.related_files:
+                if related_path in contents:
+                    continue
+                file_path = self.workspace_root / related_path
+                if file_path.exists():
+                    contents[related_path] = read_text_file(file_path)
         for hit in retrieval_hits:
             if hit.path in contents:
                 continue
@@ -190,7 +293,49 @@ class DemoWorkflow:
                 contents[relative] = read_text_file(candidate)
         return contents
 
+    def _build_task_plan(
+        self,
+        *,
+        task_title: str,
+        task_description: str,
+        retrieval_hits: list[RetrievalHit],
+        discovered: dict[str, str],
+    ) -> TaskPlanResult:
+        return self.llm_planner.plan_task_subgoals(
+            task_title=task_title,
+            task_description=task_description,
+            focus_paths=self.focus_paths,
+            retrieval_hits=[hit.model_dump(mode='json') for hit in retrieval_hits],
+            memory_notes=[note.model_dump(mode='json') for note in self.memory_notes],
+            file_contexts=[{'path': path, 'content': content} for path, content in discovered.items()],
+        )
+
+    def _goal_event_step(self, subgoal: TaskSubgoalSpec) -> TaskStep:
+        phase = subgoal.phase.lower().strip()
+        if phase == 'inspect':
+            return TaskStep.read
+        if phase == 'implement':
+            return TaskStep.patch
+        if phase == 'verify':
+            return TaskStep.summarize
+        return TaskStep.analyze
+
+    def _serialize_subgoal(self, task_id: str, subgoal: TaskSubgoalSpec, *, status: str) -> dict[str, object]:
+        now = datetime.utcnow().isoformat()
+        payload = asdict(subgoal)
+        payload.update(
+            {
+                'task_id': task_id,
+                'status': status,
+                'created_at': now,
+                'updated_at': now,
+                'completed_at': now if status == 'completed' else None,
+            }
+        )
+        return payload
+
     async def _run_collaborative_loop(
+        # DOC_ANCHOR: workflow.collaborative_loop
         self,
         *,
         task_id: str,
@@ -469,7 +614,7 @@ class DemoWorkflow:
                         f'Restored the workspace after {branch_name}',
                         {'branch': branch_name, 'snapshot_path': str(snapshot_path)},
                     )
-                current_context = self._read_context_files(retrieval_hits)
+                current_context = self._read_context_files(retrieval_hits, self.memory_notes)
                 if review.files_to_read:
                     newly_read = self._read_requested_files(review.files_to_read, current_context)
                     if newly_read:
@@ -511,6 +656,21 @@ class DemoWorkflow:
         if not summary:
             summary = self._summarize_outcome(final_test, changed_files)
 
+        branch_comparison = self._build_branch_comparison(
+            branch_history=branch_history,
+            summary=summary,
+            final_test=final_test,
+            changed_files=changed_files,
+            review_decision=review_decision,
+            llm_used=llm_used,
+        )
+        await emit(
+            'branch.comparison.completed',
+            TaskStep.summarize,
+            branch_comparison.get('summary', summary),
+            branch_comparison,
+        )
+
         return ReactLoopResult(
             summary=summary,
             patch=patch,
@@ -523,6 +683,8 @@ class DemoWorkflow:
             react_turns=react_turns,
             branch_count=self._count_explored_branches(branch_history),
             review_decision=review_decision,
+            subgoal_count=0,
+            branch_comparison=branch_comparison,
         )
 
     async def _plan_react_decision(
@@ -822,6 +984,114 @@ class DemoWorkflow:
                 total += 1
         return total
 
+    def _build_branch_comparison(
+        # DOC_ANCHOR: workflow.branch_comparison
+        self,
+        *,
+        branch_history: list[dict[str, object]],
+        summary: str,
+        final_test: TestOutcome,
+        changed_files: list[str],
+        review_decision: str,
+        llm_used: bool,
+    ) -> dict[str, object]:
+        if not branch_history:
+            return {
+                'summary': summary,
+                'turn_count': 0,
+                'candidate_count': 0,
+                'winning_branch': None,
+                'review_decision': review_decision,
+                'final_test_passed': final_test.passed,
+                'changed_files': changed_files,
+                'llm_used': llm_used,
+                'highlights': [],
+                'turns': [],
+            }
+
+        total_candidates = 0
+        turns: list[dict[str, object]] = []
+        winning_branch = None
+        for entry in branch_history:
+            if not isinstance(entry, dict):
+                continue
+            raw_candidates = entry.get('candidates') if isinstance(entry.get('candidates'), list) else []
+            normalized_candidates: list[dict[str, object]] = []
+            for candidate in raw_candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                normalized_candidates.append({
+                    'branch': candidate.get('branch'),
+                    'agent': candidate.get('agent'),
+                    'profile': candidate.get('profile'),
+                    'action': candidate.get('action'),
+                    'summary': candidate.get('summary'),
+                    'rationale': candidate.get('rationale'),
+                    'files_to_read': candidate.get('files_to_read', []),
+                    'score': candidate.get('score', 0),
+                    'selected': candidate.get('selected', False),
+                })
+                total_candidates += 1
+                if candidate.get('selected') is True:
+                    winning_branch = str(candidate.get('branch') or winning_branch or '') or winning_branch
+            turns.append({
+                'turn': entry.get('turn'),
+                'selected_branch': entry.get('branch'),
+                'agent': entry.get('agent'),
+                'profile': entry.get('profile'),
+                'action': entry.get('action'),
+                'summary': entry.get('summary'),
+                'rationale': entry.get('rationale'),
+                'score': entry.get('score', 0),
+                'candidate_count': len(normalized_candidates),
+                'candidates': normalized_candidates,
+            })
+
+        if winning_branch is None and turns:
+            last_turn = turns[-1]
+            winning_branch = last_turn.get('selected_branch') if isinstance(last_turn.get('selected_branch'), str) else None
+
+        highlights = [
+            f'Explored {len(turns)} turn(s) and {total_candidates} candidate branches.',
+            f'Final review decision: {review_decision}.',
+            'LLM reasoning was used.' if llm_used else 'Heuristic reasoning handled the branch comparison.',
+            'Tests passed.' if final_test.passed else 'Tests still failed at the end of the loop.',
+        ]
+        if winning_branch:
+            highlights.insert(1, f'Winning branch: {winning_branch}.')
+        if changed_files:
+            highlights.append('Changed files: ' + ', '.join(changed_files))
+
+        return {
+            'summary': summary,
+            'turn_count': len(turns),
+            'candidate_count': total_candidates,
+            'winning_branch': winning_branch,
+            'review_decision': review_decision,
+            'final_test_passed': final_test.passed,
+            'changed_files': changed_files,
+            'llm_used': llm_used,
+            'highlights': highlights,
+            'turns': turns,
+        }
+
+    def _tokenize(self, text: str) -> list[str]:
+        tokens: list[str] = []
+        for raw in text.replace('/', ' ').replace('-', ' ').split():
+            cleaned = ''.join(ch.lower() for ch in raw if ch.isalnum() or ch == '_')
+            if len(cleaned) >= 2:
+                tokens.append(cleaned)
+        return tokens
+
+    def _dedupe(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            if value and value not in seen:
+                seen.add(value)
+                ordered.append(value)
+        return ordered
+
     def _read_requested_files(self, files_to_read: list[str], current_context: dict[str, str]) -> dict[str, str]:
         newly_read: dict[str, str] = {}
         for relative_path in files_to_read:
@@ -965,6 +1235,7 @@ class DemoWorkflow:
         return None
 
     async def _run_tests(
+        # DOC_ANCHOR: workflow.run_tests
         self,
         *,
         emit: Callable[[str, TaskStep | str, str, dict | None], Awaitable[None]],
@@ -997,3 +1268,9 @@ async def _to_thread(func, *args, **kwargs):
     import asyncio
 
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+
+
+
+

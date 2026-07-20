@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+from uuid import uuid4
 
 from .workflow.patch_model import PatchProposal
 
@@ -16,6 +17,26 @@ class LLMPlanResult:
     proposal: PatchProposal
     summary: str
     rationale: str
+    model: str
+    provider: str = 'openai'
+
+
+@dataclass(slots=True)
+class TaskSubgoalSpec:
+    subgoal_id: str = field(default_factory=lambda: str(uuid4()))
+    position: int = 0
+    phase: str = 'analysis'
+    title: str = ''
+    description: str = ''
+    success_criteria: list[str] = field(default_factory=list)
+    files_to_read: list[str] = field(default_factory=list)
+    rationale: str = ''
+
+
+@dataclass(slots=True)
+class TaskPlanResult:
+    subgoals: list[TaskSubgoalSpec]
+    summary: str
     model: str
     provider: str = 'openai'
 
@@ -134,6 +155,66 @@ class OpenAIPlanner:
             provider=self.provider,
         )
 
+    def plan_task_subgoals(
+        self,
+        *,
+        task_title: str,
+        task_description: str,
+        focus_paths: list[str],
+        retrieval_hits: list[dict[str, Any]],
+        memory_notes: list[dict[str, Any]],
+        file_contexts: list[dict[str, Any]],
+    ) -> TaskPlanResult:
+        if self.enabled:
+            prompt_payload = {
+                'task_title': task_title,
+                'task_description': task_description,
+                'focus_paths': focus_paths,
+                'retrieval_hits': retrieval_hits[:6],
+                'memory_notes': memory_notes[:6],
+                'file_contexts': [
+                    {
+                        'path': entry.get('path', ''),
+                        'content': str(entry.get('content', ''))[:3000],
+                    }
+                    for entry in file_contexts[:8]
+                ],
+                'instructions': (
+                    'Return one JSON object only. Break the task into exactly three subgoals. '
+                    'Each subgoal must include phase, title, description, success_criteria, files_to_read, and rationale.'
+                ),
+            }
+            system_prompt = (
+                'You are a task decomposition planner for a code-repair agent. '
+                'Turn the user request into exactly three ordered subgoals: inspect, implement, verify. '
+                'Keep them small, concrete, and aligned with the repository context. '
+                'Return one JSON object with keys summary and subgoals. '
+                'Each item in subgoals must contain phase, title, description, success_criteria, files_to_read, and rationale.'
+            )
+            raw_text = self._invoke_responses_api(
+                instructions=system_prompt,
+                input_text=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
+            )
+            if raw_text:
+                payload = _extract_json_object(raw_text)
+                if isinstance(payload, dict):
+                    subgoals = self._parse_subgoal_payload(payload.get('subgoals'))
+                    if subgoals:
+                        return TaskPlanResult(
+                            subgoals=self._normalize_subgoal_positions(subgoals),
+                            summary=str(payload.get('summary', '')).strip() or self._default_plan_summary(task_title),
+                            model=self.model,
+                            provider=self.provider,
+                        )
+
+        subgoals = self._build_heuristic_subgoals(task_title, task_description, focus_paths, retrieval_hits, file_contexts, memory_notes)
+        return TaskPlanResult(
+            subgoals=self._normalize_subgoal_positions(subgoals),
+            summary=self._default_plan_summary(task_title),
+            model=self.model or 'heuristic',
+            provider='heuristic',
+        )
+
     def plan_next_step(self, *, state: Mapping[str, Any]) -> ReActDecision | None:
         if not self.enabled:
             return None
@@ -226,6 +307,132 @@ class OpenAIPlanner:
             model=self.model,
             provider=self.provider,
         )
+
+    def _build_heuristic_subgoals(
+        self,
+        task_title: str,
+        task_description: str,
+        focus_paths: list[str],
+        retrieval_hits: list[dict[str, Any]],
+        file_contexts: list[dict[str, Any]],
+        memory_notes: list[dict[str, Any]],
+    ) -> list[TaskSubgoalSpec]:
+        inspection_files = self._dedupe_strings(
+            focus_paths[:3]
+            + [str(hit.get('path', '')).strip() for hit in retrieval_hits[:3]]
+            + [str(entry.get('path', '')).strip() for entry in file_contexts[:2]]
+        )
+        implementation_files = self._dedupe_strings(
+            [path for path in inspection_files if path]
+            + [str(entry.get('path', '')).strip() for entry in file_contexts[2:4]]
+        )
+        verification_files = self._dedupe_strings(
+            [path for path in inspection_files if path.startswith('tests/')]
+            + [path for path in implementation_files if path.startswith('tests/')]
+        )
+        if not verification_files:
+            verification_files = inspection_files[:2]
+
+        memory_hint = ' Use prior memory to avoid repeating known failures.' if memory_notes else ''
+        return [
+            TaskSubgoalSpec(
+                position=0,
+                phase='inspect',
+                title='Inspect the failing surface',
+                description='Read the likely files, confirm the bug shape, and understand the current behavior.' if not task_description else f'Read the likely files and understand the task: {task_description.strip()}',
+                success_criteria=[
+                    'Relevant files have been read',
+                    'The failing behavior is understood',
+                    'The likely change surface is identified',
+                ],
+                files_to_read=inspection_files,
+                rationale=f'Ground the task in the repository context before editing.{memory_hint}',
+            ),
+            TaskSubgoalSpec(
+                position=1,
+                phase='implement',
+                title='Apply the smallest safe change',
+                description='Produce the minimal patch that addresses the root cause without widening the change surface.' if not task_title else f'Patch the root cause for: {task_title.strip()}',
+                success_criteria=[
+                    'A focused patch has been applied',
+                    'The changed code matches the task constraints',
+                    'No unrelated code paths were expanded',
+                ],
+                files_to_read=implementation_files,
+                rationale='Keep the edit small and reversible.',
+            ),
+            TaskSubgoalSpec(
+                position=2,
+                phase='verify',
+                title='Verify and summarize the result',
+                description='Run the checks, confirm the behavior, and capture the outcome in a short summary.',
+                success_criteria=[
+                    'Relevant tests have been run',
+                    'The result is explained clearly',
+                    'The final state is ready for handoff',
+                ],
+                files_to_read=verification_files,
+                rationale='Close the loop with validation and a human-readable summary.',
+            ),
+        ]
+
+    def _parse_subgoal_payload(self, payload: Any) -> list[TaskSubgoalSpec]:
+        if not isinstance(payload, list):
+            return []
+        subgoals: list[TaskSubgoalSpec] = []
+        for index, item in enumerate(payload[:3]):
+            if not isinstance(item, dict):
+                continue
+            phase = str(item.get('phase', '')).strip() or ('inspect' if index == 0 else 'implement' if index == 1 else 'verify')
+            title = str(item.get('title', '')).strip()
+            description = str(item.get('description', '')).strip()
+            success_criteria = [str(value).strip() for value in item.get('success_criteria', []) or [] if str(value).strip()]
+            files_to_read = [str(value).strip() for value in item.get('files_to_read', []) or [] if str(value).strip()]
+            rationale = str(item.get('rationale', '')).strip()
+            if not title:
+                continue
+            subgoals.append(
+                TaskSubgoalSpec(
+                    position=index,
+                    phase=phase,
+                    title=title,
+                    description=description,
+                    success_criteria=success_criteria,
+                    files_to_read=self._dedupe_strings(files_to_read),
+                    rationale=rationale,
+                )
+            )
+        return subgoals
+
+    def _normalize_subgoal_positions(self, subgoals: list[TaskSubgoalSpec]) -> list[TaskSubgoalSpec]:
+        normalized: list[TaskSubgoalSpec] = []
+        for index, subgoal in enumerate(subgoals):
+            normalized.append(
+                TaskSubgoalSpec(
+                    subgoal_id=subgoal.subgoal_id,
+                    position=index,
+                    phase=subgoal.phase,
+                    title=subgoal.title,
+                    description=subgoal.description,
+                    success_criteria=subgoal.success_criteria,
+                    files_to_read=subgoal.files_to_read,
+                    rationale=subgoal.rationale,
+                )
+            )
+        return normalized
+
+    def _default_plan_summary(self, task_title: str) -> str:
+        return f'Task plan prepared for {task_title.strip() or "the task"}.'
+
+    def _dedupe_strings(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                ordered.append(cleaned)
+        return ordered
 
     def _invoke_responses_api(self, *, instructions: str, input_text: str) -> str:
         payload = {

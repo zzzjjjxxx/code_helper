@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -71,6 +71,7 @@ def restore_snapshot(snapshot_dir: str | Path, workspace_root: str | Path) -> No
 
 
 def run_command(
+    # DOC_ANCHOR: tools.run_command
     command: Iterable[str],
     *,
     workspace_root: str | Path,
@@ -93,6 +94,8 @@ def run_command(
         raise PermissionError(f"Command is not allowed: {command_display}")
 
     env = _safe_environment()
+    if len(parts) >= 3 and Path(parts[0]).name.lower().startswith('python') and parts[1:3] == ['-m', 'pytest']:
+        env['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
     try:
         completed = subprocess.run(
             parts,
@@ -184,10 +187,26 @@ def _sha256(path: Path) -> str:
 
 
 def _safe_environment() -> dict[str, str]:
-    env = dict(os.environ)
+    # DOC_ANCHOR: tools.safe_environment
+    allowed_keys = {
+        "PATH",
+        "SystemRoot",
+        "WINDIR",
+        "HOME",
+        "USERPROFILE",
+        "TEMP",
+        "TMP",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "VIRTUAL_ENV",
+    }
+    env = {key: value for key, value in os.environ.items() if key in allowed_keys or key.startswith("APP_")}
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
 
 def _duration_ms(started: datetime) -> int:
     return int((datetime.utcnow() - started).total_seconds() * 1000)
+
+
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
@@ -30,6 +30,14 @@ class TaskStep(str, Enum):
     review = "review"
     summarize = "summarize"
     rollback = "rollback"
+
+
+class SubgoalStatus(str, Enum):
+    planned = "planned"
+    active = "active"
+    completed = "completed"
+    blocked = "blocked"
+    skipped = "skipped"
 
 
 class TaskCreateRequest(BaseModel):
@@ -68,6 +76,23 @@ class MemoryRecord(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     related_files: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+
+
+class TaskSubgoalRecord(BaseModel):
+    id: int | None = None
+    subgoal_id: str = Field(default_factory=lambda: str(uuid4()))
+    task_id: str
+    position: int = 0
+    phase: str
+    title: str
+    description: str = ""
+    success_criteria: list[str] = Field(default_factory=list)
+    files_to_read: list[str] = Field(default_factory=list)
+    rationale: str = ""
+    status: SubgoalStatus = SubgoalStatus.planned
+    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    completed_at: datetime | None = None
 
 
 class TaskEventModel(BaseModel):
@@ -134,6 +159,7 @@ class TaskDetail(TaskSummary):
     latest_diff: str | None = None
     latest_test_result: TestOutcome | None = None
     latest_retrieval: list[RetrievalHit] = Field(default_factory=list)
+    subgoals: list[TaskSubgoalRecord] = Field(default_factory=list)
     snapshots: list[SnapshotRecord] = Field(default_factory=list)
     memory: list[MemoryRecord] = Field(default_factory=list)
     events: list[TaskEventModel] = Field(default_factory=list)

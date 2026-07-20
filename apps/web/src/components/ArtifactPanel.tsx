@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 
 import type { ArtifactRecord } from '../types'
 
 function formatArtifactContent(artifact: ArtifactRecord): string {
-  if (artifact.type === 'test_report') {
+  // DOC_ANCHOR: artifact.format
+  if (artifact.type === 'diff') {
+    return artifact.content
+  }
+
+  const trimmed = artifact.content.trim()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
-      return `${JSON.stringify(JSON.parse(artifact.content), null, 2)}\n`
+      return `${JSON.stringify(JSON.parse(trimmed), null, 2)}\n`
     } catch {
       return artifact.content
     }
@@ -15,6 +21,7 @@ function formatArtifactContent(artifact: ArtifactRecord): string {
 }
 
 export function ArtifactPanel({ artifacts }: { artifacts: ArtifactRecord[] }) {
+  // DOC_ANCHOR: artifact.panel
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -82,3 +89,5 @@ export function ArtifactPanel({ artifacts }: { artifacts: ArtifactRecord[] }) {
     </section>
   )
 }
+
+

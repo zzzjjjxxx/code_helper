@@ -13,6 +13,8 @@ export type TaskStatus =
 
 export type TaskStep = 'read' | 'analyze' | 'patch' | 'test' | 'review' | 'summarize' | 'rollback'
 
+export type SubgoalStatus = 'planned' | 'active' | 'completed' | 'blocked' | 'skipped'
+
 export interface TaskCreateRequest {
   title: string
   description?: string
@@ -49,6 +51,23 @@ export interface MemoryRecord {
   keywords: string[]
   related_files: string[]
   created_at: string
+}
+
+export interface TaskSubgoalRecord {
+  id: number | null
+  subgoal_id: string
+  task_id: string
+  position: number
+  phase: string
+  title: string
+  description: string
+  success_criteria: string[]
+  files_to_read: string[]
+  rationale: string
+  status: SubgoalStatus
+  created_at: string
+  updated_at: string
+  completed_at: string | null
 }
 
 export interface TaskEvent {
@@ -108,6 +127,7 @@ export interface TaskDetail extends TaskSummary {
   latest_diff: string | null
   latest_test_result: TestOutcome | null
   latest_retrieval: RetrievalHit[]
+  subgoals: TaskSubgoalRecord[]
   memory: MemoryRecord[]
   snapshots: SnapshotRecord[]
   events: TaskEvent[]
