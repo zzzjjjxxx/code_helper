@@ -23,7 +23,7 @@
 
 ### 后端
 
-- [`apps/api/main.py`](<D:/code_helper/apps/api/main.py:17>)：FastAPI 入口，负责把所有路由、服务、存储系统组装起来。
+- [`apps/api/main.py`](<../apps/api/main.py#17>)：FastAPI 入口，负责把所有路由、服务、存储系统组装起来。
 - [`apps/api/services/task_service.py`](<D:/code_helper/apps/api/services/task_service.py:28>)：任务执行中枢，真正把“创建任务 -> 跑任务 -> 存事件 -> 存产物”串起来。
 - [`apps/api/services/event_service.py`](<D:/code_helper/apps/api/services/event_service.py:14>)：负责把事件写入数据库，并实时推送给前端。
 - [`apps/api/services/rollback_service.py`](<D:/code_helper/apps/api/services/rollback_service.py:14>)：负责回滚，把代码恢复到快照前状态。
