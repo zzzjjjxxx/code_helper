@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from assistant_shared.models import ArtifactRecord, RollbackResponse, TaskCreateRequest, TaskDetail, TaskRunResponse, TaskSummary
+from assistant_shared.models import ArtifactRecord, RollbackResponse, TaskChatRequest, TaskChatResponse, TaskCreateRequest, TaskDetail, TaskRunResponse, TaskSummary
 
 from apps.api.core.deps import get_container
 from apps.api.core.container import AppContainer
@@ -47,6 +47,23 @@ async def rollback_task(task_id: str, container: AppContainer = Depends(get_cont
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+@router.post("/{task_id}/chat", response_model=TaskChatResponse)
+async def chat_task(task_id: str, payload: TaskChatRequest, container: AppContainer = Depends(get_container)) -> TaskChatResponse:
+    try:
+        return await container.task_service.chat_task(task_id, payload.message)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/{task_id}", response_model=TaskSummary)
+async def delete_task(task_id: str, container: AppContainer = Depends(get_container)) -> TaskSummary:
+    try:
+        return await container.task_service.delete_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.get("/{task_id}/artifacts", response_model=list[ArtifactRecord])
 def list_task_artifacts(task_id: str, container: AppContainer = Depends(get_container)) -> list[ArtifactRecord]:

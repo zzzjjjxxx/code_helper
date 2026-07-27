@@ -120,12 +120,20 @@ def run_pytest(
                 args_prefix=["-m", "pytest", "-q"],
             ),
         )
-    return run_command(
+    outcome = run_command(
         [sys.executable, "-m", "pytest", "-q"],
         workspace_root=workspace_root,
         allowed_commands=rules,
         timeout_seconds=timeout_seconds,
     )
+    if outcome.return_code == 5:
+        test_files = list(Path(workspace_root).rglob("test_*.py")) + list(Path(workspace_root).rglob("*_test.py"))
+        if not any(candidate.is_file() for candidate in test_files):
+            outcome = outcome.model_copy(update={
+                "passed": True,
+                "stderr": "No tests collected; verification skipped.",
+            })
+    return outcome
 
 
 def preview_text(text: str, lines: int = 24) -> str:

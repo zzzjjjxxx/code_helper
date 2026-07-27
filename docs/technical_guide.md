@@ -28,7 +28,6 @@
 - [事件服务](<../apps/api/services/event_service.py#L14>)：写事件并实时推送给前端。
 - [回滚服务](<../apps/api/services/rollback_service.py#L14>)：恢复到快照前状态。
 - [SQLite 存储](<../apps/api/storage/sqlite.py#L95>)：保存任务、事件、快照、产物、记忆、子目标。
->>>>>>> 5b7b264 (update)
 
 ### Agent 层
 
@@ -39,7 +38,7 @@
 ### 前端
 
 - [任务详情页](<../apps/web/src/components/TaskDetail.tsx#L140>)：总控页面。
-- [分支对比面板](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)：展示多 Agent 比较结果。
+- [分支对比面板](<../apps/web/src/components/BranchComparisonPanel.tsx#L333>)：展示多 Agent 比较结果。
 - [协作面板](<../apps/web/src/components/CollaborationPanel.tsx#L32>)：展示 planner / executor / reviewer / coordinator 的交接。
 - [时间线](<../apps/web/src/components/TaskTimeline.tsx#L30>)：完整事件流。
 - [产物面板](<../apps/web/src/components/ArtifactPanel.tsx#L1>)：看 diff、测试报告、分支比较摘要。
@@ -221,9 +220,9 @@
 ### 关键代码
 
 - [并行入口 `choose_parallel_branch`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
-- [分支构建 `_build_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L153>)
-- [分支回退 `_fallback_branch_decision`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L263>)
-- [分支打分 `_score_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L394>)
+- [分支构建 `_build_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L154>)
+- [分支回退 `_fallback_branch_decision`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L265>)
+- [分支打分 `_score_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L408>)
 
 ## 11. 分支比较结果是什么
 
@@ -306,10 +305,10 @@
 
 ### 关键代码
 
-- [事件合并 `applyEvent`](<../apps/web/src/components/TaskDetail.tsx#L19>)
+- [事件合并 `applyEvent`](<../apps/web/src/components/TaskDetail.tsx#L44>)
 - [总控组件 `TaskDetailPanel`](<../apps/web/src/components/TaskDetail.tsx#L140>)
 
-[ `BranchComparisonPanel`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>) 是第五阶段最关键的可视化。
+[ `BranchComparisonPanel`](<../apps/web/src/components/BranchComparisonPanel.tsx#L333>) 是第五阶段最关键的可视化。
 
 它会把每轮候选分支、选中分支、比较摘要一起展示出来。
 
@@ -360,7 +359,7 @@
 5. [ `packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
 6. [ `packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
 7. [ `apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L140>)
-8. [ `apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)
+8. [ `apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L333>)
 
 ## 19. 锚点索引
 
@@ -374,16 +373,16 @@
 - `workflow.demo` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
 - `workflow.run` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L82>)
 - `workflow.collaborative_loop` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L337>)
-- `workflow.branch_comparison` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L987>)
-- `workflow.run_tests` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1237>)
+- `workflow.branch_comparison` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1068>)
+- `workflow.run_tests` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1424>)
 - `parallel_branches.choose` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
-- `parallel_branches.build_candidate` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L153>)
-- `parallel_branches.fallback` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L263>)
-- `parallel_branches.score` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L394>)
-- `task_detail.apply_event` -> [`apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L19>)
+- `parallel_branches.build_candidate` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L154>)
+- `parallel_branches.fallback` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L265>)
+- `parallel_branches.score` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L408>)
+- `task_detail.apply_event` -> [`apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L44>)
 - `task_detail.panel` -> [`apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L141>)
 - `branch_comparison.build_view` -> [`apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L147>)
-- `branch_comparison.panel` -> [`apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L332>)
+- `branch_comparison.panel` -> [`apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L333>)
 - `collaboration.role_map` -> [`apps/web/src/components/CollaborationPanel.tsx`](<../apps/web/src/components/CollaborationPanel.tsx#L3>)
 - `collaboration.panel` -> [`apps/web/src/components/CollaborationPanel.tsx`](<../apps/web/src/components/CollaborationPanel.tsx#L32>)
 - `artifact.format` -> [`apps/web/src/components/ArtifactPanel.tsx`](<../apps/web/src/components/ArtifactPanel.tsx#L1>)
@@ -391,10 +390,39 @@
 - `tools.run_command` -> [`packages/tools/src/assistant_tools/security.py`](<../packages/tools/src/assistant_tools/security.py#L73>)
 - `tools.safe_environment` -> [`packages/tools/src/assistant_tools/security.py`](<../packages/tools/src/assistant_tools/security.py#L189>)
 
+
+## 关键实现说明（按当前代码）
+
+### 任务生命周期与成功判定
+
+[`TaskService._execute`](<../apps/api/services/task_service.py#L74>) 是后端闭环的编排入口：它先检索历史记忆，再创建 [`DemoWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L65>)，通过内部 `emit` 回调把工作流事件统一交给 [`EventService`](<../apps/api/services/event_service.py#L19>)，同时调用 [`_apply_progress_event`](<../apps/api/services/task_service.py#L296>) 推进任务状态。
+
+工作流完成后，服务层并不是只看测试结果，而是要求 `result.final_test.passed` 且 `result.review_decision == 'approve'`；这段双重判定位于 [`_execute`](<../apps/api/services/task_service.py#L154>)。因此“测试通过但 reviewer 不批准”仍会进入 `failed`，并保留 diff、测试报告和错误原因，便于继续追问或重新运行。
+
+### ReAct 协作循环
+
+[`_run_collaborative_loop`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L342>) 每轮最多执行四次决策。它先调用 [`choose_parallel_branch`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>) 并发生成 planner、critic、memory、explorer、verifier 五个候选；[`_score_candidate`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L408>) 综合测试结果、上下文量、历史分支和当前动作，选择得分最高的候选。
+
+选中 `read_more` 时只扩展上下文；选中 `patch` 时先调用 [`capture_snapshot`](<../packages/tools/src/assistant_tools/security.py#L42>)，再校验路径并写入文件，随后通过 [`_run_tests`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1424>) 验证。reviewer 返回 `revise` 或 `reject` 时，工作流使用 [`restore_snapshot`](<../packages/tools/src/assistant_tools/security.py#L58>) 撤销当前分支，再进入下一轮。
+
+### LLM 与启发式回退
+
+[`OpenAIPlanner`](<../packages/agent-core/src/agent_core/llm.py#L97>) 将规划、执行器工具选择、结果审查和聊天分别封装为结构化 JSON 请求。响应通过 [`_extract_json_object`](<../packages/agent-core/src/agent_core/llm.py#L774>) 解析；未配置 key、请求失败或 JSON 无效时，规划器返回 heuristic 结果，分支层则使用 [`_fallback_branch_decision`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L265>)，所以本地闭环不会因为 LLM 不可用而直接崩溃。
+
+### 事件、存储与前端同步
+
+[`EventService.emit`](<../apps/api/services/event_service.py#L19>) 先将事件写入 [`SQLiteStore.append_event`](<../apps/api/storage/sqlite.py#L239>)，再广播到订阅队列；[`EventService.stream`](<../apps/api/services/event_service.py#L54>) 先回放 `after_sequence` 之后的历史事件，再等待实时事件。前端 [`applyEvent`](<../apps/web/src/components/TaskDetail.tsx#L44>) 追加事件，并即时合并子目标、diff、检索结果和测试结果，因此页面无需反复等待完整详情接口。
+
+### 安全边界与回滚
+
+默认允许的命令规则见 [`DEFAULT_ALLOWED_COMMANDS`](<../apps/api/core/config.py#L13>)；[`run_command`](<../packages/tools/src/assistant_tools/security.py#L73>) 在执行前检查可执行文件和参数前缀，并限制安全环境。快照会写入 manifest 和文件哈希，恢复前由 [`validate_snapshot`](<../packages/tools/src/assistant_tools/security.py#L141>) 校验完整性；公开回滚流程见 [`RollbackService.rollback`](<../apps/api/services/rollback_service.py#L17>)。
+
+### 当前代码边界
+
+当前补丁模型主要支持单文件创建或已有文件的一次文本替换；五个并行分支是“决策候选”的并行比较，不是五份工作区的并行写入；任务最终成功必须同时满足测试通过和 reviewer 批准。
 ## 20. 最后一句话
 
 这个项目的核心不是“会聊天”，而是“会把任务真正做完”。
 
 Agent 的脑子在 LLM，手脚在工具，记忆在数据库，眼睛在事件流，保险丝在快照回滚。
-
 

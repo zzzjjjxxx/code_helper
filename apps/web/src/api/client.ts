@@ -1,4 +1,4 @@
-import { ArtifactRecord, SecurityPolicy, TaskCreateRequest, TaskDetail, TaskEvent, TaskStatus, TaskSummary, TestOutcome } from './types'
+import { ArtifactRecord, SecurityPolicy, TaskChatRequest, TaskChatResponse, TaskCreateRequest, TaskDetail, TaskEvent, TaskStatus, TaskSummary, TestOutcome } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 
@@ -24,6 +24,9 @@ export const api = {
   listTasks: () => request<TaskSummary[]>('/tasks'),
   getTask: (taskId: string) => request<TaskDetail>(`/tasks/${taskId}`),
   createTask: (payload: TaskCreateRequest) => request<TaskDetail>('/tasks', { method: 'POST', body: JSON.stringify(payload) }),
+  pickWorkspace: () => request<{ path: string | null }>('/workspace/pick', { method: 'POST' }),
+  deleteTask: (taskId: string) => request<TaskSummary>(`/tasks/${taskId}`, { method: 'DELETE' }),
+  chatTask: (taskId: string, payload: TaskChatRequest) => request<TaskChatResponse>(`/tasks/${taskId}/chat`, { method: 'POST', body: JSON.stringify(payload) }),
   runTask: (taskId: string) => request<{ task: TaskSummary; accepted: boolean }>(`/tasks/${taskId}/run`, { method: 'POST' }),
   rollbackTask: (taskId: string) => request<{ task: TaskSummary; restored_snapshot_id: string | null; message: string }>(`/tasks/${taskId}/rollback`, { method: 'POST' }),
   listTaskArtifacts: (taskId: string) => request<ArtifactRecord[]>(`/tasks/${taskId}/artifacts`),
@@ -37,6 +40,8 @@ export type {
   MemoryRecord,
   RetrievalHit,
   SecurityPolicy,
+  TaskChatRequest,
+  TaskChatResponse,
   TaskCreateRequest,
   TaskDetail,
   TaskEvent,

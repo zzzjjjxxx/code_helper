@@ -22,6 +22,19 @@ export interface TaskCreateRequest {
   focus_paths?: string[]
 }
 
+export interface TaskChatRequest {
+  message: string
+}
+
+export interface TaskChatResponse {
+  reply: string
+  suggested_panel: string | null
+  used_llm: boolean
+  model: string | null
+  implementation_request: boolean
+  follow_up_started: boolean
+}
+
 export interface CommandRule {
   executables: string[]
   args_prefix: string[]

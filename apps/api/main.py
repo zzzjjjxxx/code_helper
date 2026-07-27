@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apps.api.api.routes.events import router as events_router
 from apps.api.api.routes.security import router as security_router
 from apps.api.api.routes.tasks import router as tasks_router
+from apps.api.api.routes.workspace import router as workspace_router
 from apps.api.core.config import get_settings
 from apps.api.core.container import AppContainer
 from apps.api.services.event_service import EventService
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(tasks_router)
+    app.include_router(workspace_router)
     app.include_router(events_router)
     app.include_router(security_router)
     return app

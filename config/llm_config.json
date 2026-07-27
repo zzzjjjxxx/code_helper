@@ -1,9 +1,9 @@
 ﻿{
-  "provider": "openai",
-  "base_url": "https://api.openai.com/v1",
-  "api_key_env": "OPENAI_API_KEY",
-  "model": "gpt-5.1",
+  "provider": "deepseek",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DeepSeek_API_KEY",
+  "model": "deepseek-v4-pro",
   "temperature": 0.2,
-  "max_output_tokens": 2048,
+  "max_output_tokens": 4096,
   "timeout_seconds": 120
 }

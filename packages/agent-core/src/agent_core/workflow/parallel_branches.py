@@ -271,6 +271,17 @@ def _fallback_branch_decision(
     latest_test: TestOutcome,
     patch_applied: bool,
 ) -> ReActDecision:
+    create_request = workflow._infer_create_request()
+    if create_request is not None:
+        return ReActDecision(
+            action='patch',
+            summary='Create the requested file directly.',
+            rationale='The chat request explicitly asks for a new file.',
+            proposal=create_request,
+            provider='heuristic',
+            model='heuristic',
+        )
+
     if agent == 'critic':
         files = [path for path in discovered if path.startswith('tests/')]
         if not files:

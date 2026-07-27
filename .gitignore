@@ -12,3 +12,7 @@ data/app.db
 data/*.db
 data/snapshots/*
 !data/snapshots/.gitkeep
+.env
+.env.*
+*.secret
+config/*local*

@@ -47,6 +47,19 @@ class TaskCreateRequest(BaseModel):
     focus_paths: list[str] = Field(default_factory=list)
 
 
+class TaskChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class TaskChatResponse(BaseModel):
+    reply: str
+    suggested_panel: str | None = None
+    used_llm: bool = False
+    model: str | None = None
+    implementation_request: bool = False
+    follow_up_started: bool = False
+
+
 class CommandRule(BaseModel):
     executables: list[str] = Field(default_factory=list)
     args_prefix: list[str] = Field(default_factory=list)

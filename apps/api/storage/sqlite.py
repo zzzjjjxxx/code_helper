@@ -180,6 +180,19 @@ class SQLiteStore:
                 raise KeyError(f"Task '{task_id}' not found")
             return row_to_summary(dict(row))
 
+    def delete_task(self, task_id: str) -> TaskSummary:
+        task = self.get_task(task_id)
+        with self._write_connection() as connection:
+            connection.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_snapshots WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_artifacts WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_memory WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_subgoals WHERE task_id = ?", (task_id,))
+            cursor = connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            if cursor.rowcount == 0:
+                raise KeyError(f"Task '{task_id}' not found")
+        return task
+
     def get_task_detail(self, task_id: str) -> TaskDetail:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

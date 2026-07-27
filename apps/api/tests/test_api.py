@@ -10,6 +10,7 @@ import pytest
 
 from apps.api.main import app
 from assistant_tools import SNAPSHOT_MANIFEST_NAME, run_command
+from agent_core.llm import ChatResponseResult, ChatResponseReviewResult
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "data"
@@ -29,6 +30,9 @@ def reset_state() -> None:
     _clear_database(DB_PATH)
     _rmtree_with_retry(SNAPSHOT_DIR)
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    for extra_generated in [WORKSPACE_FILE.parent / "sorter.py", WORKSPACE_FILE.parent.parent / "sorter.py"]:
+        if extra_generated.exists():
+            extra_generated.unlink()
     WORKSPACE_FILE.write_text(BUGGY_SOURCE, encoding="utf-8")
 
 
@@ -205,6 +209,107 @@ def test_rollback_without_snapshot_records_failure() -> None:
         assert detail["last_error"] == "No snapshot is available for rollback"
         assert any(event["type"] == "rollback.failed" for event in detail["events"])
 
+
+
+
+def test_chat_implementation_request_starts_follow_up_execution() -> None:
+    reset_state()
+
+    with TestClient(app) as client:
+        created = client.post("/tasks", json={"title": "Create a sorting file"})
+        assert created.status_code == 201
+        task_id = created.json()["id"]
+
+        service = app.state.container.task_service
+        captured: dict[str, object] = {}
+        original_chat_task = service.chat_planner.chat_task
+        original_review_chat_response = service.chat_planner.review_chat_response
+        original_start_follow_up_execution = service._start_follow_up_execution
+
+        async def fake_start_follow_up_execution(task_id: str, *, follow_up_description: str, wait_for_active_run: bool) -> bool:
+            captured["task_id"] = task_id
+            captured["follow_up_description"] = follow_up_description
+            captured["wait_for_active_run"] = wait_for_active_run
+            return True
+
+        try:
+            service.chat_planner.chat_task = lambda **_: ChatResponseResult(
+                reply="I will implement it now.",
+                suggested_panel="summary",
+                implementation_request=True,
+                model="fake-model",
+                provider="heuristic",
+            )
+            service.chat_planner.review_chat_response = lambda **_: ChatResponseReviewResult(
+                adequate=True,
+                corrected_reply=None,
+                reason="ok",
+                suggested_panel=None,
+                model="fake-model",
+                provider="heuristic",
+            )
+            service._start_follow_up_execution = fake_start_follow_up_execution
+
+            response = client.post(f"/tasks/{task_id}/chat", json={"message": "create a sorting file with quicksort"})
+            assert response.status_code == 200
+
+            body = response.json()
+            assert body["implementation_request"] is True
+            assert body["follow_up_started"] is True
+            assert captured["task_id"] == task_id
+            assert "create it in the workspace" in str(captured["follow_up_description"]).lower()
+            assert "sorter.py" in str(captured["follow_up_description"])
+            assert captured["wait_for_active_run"] is False
+        finally:
+            service.chat_planner.chat_task = original_chat_task
+            service.chat_planner.review_chat_response = original_review_chat_response
+            service._start_follow_up_execution = original_start_follow_up_execution
+
+def test_chat_implementation_request_creates_new_file() -> None:
+    reset_state()
+
+    created_file = DATA_DIR / "demo_workspace" / "sorter.py"
+
+    with TestClient(app) as client:
+        created = client.post("/tasks", json={"title": "Create a sorting file"})
+        assert created.status_code == 201
+        task_id = created.json()["id"]
+
+        service = app.state.container.task_service
+        original_chat_task = service.chat_planner.chat_task
+        original_review_chat_response = service.chat_planner.review_chat_response
+
+        try:
+            service.chat_planner.chat_task = lambda **_: ChatResponseResult(
+                reply="I will create the sorter file now.",
+                suggested_panel="summary",
+                implementation_request=True,
+                model="fake-model",
+                provider="heuristic",
+            )
+            service.chat_planner.review_chat_response = lambda **_: ChatResponseReviewResult(
+                adequate=True,
+                corrected_reply=None,
+                reason="ok",
+                suggested_panel=None,
+                model="fake-model",
+                provider="heuristic",
+            )
+
+            response = client.post(
+                f"/tasks/{task_id}/chat",
+                json={"message": "create a sorting file with quicksort"},
+            )
+            assert response.status_code == 200
+            assert response.json()["follow_up_started"] is True
+
+            final_task = wait_for_terminal(client, task_id, timeout_seconds=45.0)
+            assert final_task["status"] in {"succeeded", "failed"}
+            assert created_file.exists()
+            assert "quicksort" in created_file.read_text(encoding="utf-8").lower()
+        finally:
+            service.chat_planner.chat_task = original_chat_task
+            service.chat_planner.review_chat_response = original_review_chat_response
 
 def test_command_isolation_blocks_unapproved_commands() -> None:
     with pytest.raises(PermissionError):

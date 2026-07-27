@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -44,6 +44,7 @@ class Settings:
 
     @classmethod
     def load(cls) -> "Settings":
+        _load_env_file(ROOT / ".env")
         data_dir = Path(os.getenv("APP_DATA_DIR", str(ROOT / "data")))
         workspace_root = Path(os.getenv("APP_WORKSPACE_ROOT", str(data_dir / "demo_workspace")))
         database_path = Path(os.getenv("APP_DATABASE_PATH", str(data_dir / "app.db")))
@@ -120,3 +121,17 @@ def _load_llm_config(path: Path) -> LLMConfig:
         max_output_tokens=int(raw.get("max_output_tokens", 2048)),
         timeout_seconds=int(raw.get("timeout_seconds", 120)),
     )
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value

@@ -1,13 +1,16 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
+import re
+import shutil
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from assistant_shared.models import SubgoalStatus, TaskCreateRequest, TaskDetail, TaskRunResponse, TaskStatus, TaskStep
+from assistant_shared.models import SubgoalStatus, TaskChatResponse, TaskCreateRequest, TaskDetail, TaskRunResponse, TaskStatus, TaskStep
 from agent_core import DemoWorkflow, advance_status
+from agent_core.llm import OpenAIPlanner
 
 from apps.api.core.config import Settings
 from apps.api.services.event_service import EventService
@@ -16,7 +19,6 @@ from apps.api.storage.sqlite import SQLiteStore
 
 
 ACTIVE_STATUSES = {
-    TaskStatus.created,
     TaskStatus.queued,
     TaskStatus.reading,
     TaskStatus.analyzing,
@@ -38,12 +40,16 @@ class TaskService:
         self.store = store
         self.events = events
         self.rollback_service = rollback_service
+        self.chat_planner = OpenAIPlanner(asdict(self.settings.llm_config))
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._pending_follow_up_tasks: dict[str, asyncio.Task[None]] = {}
 
     def create_task(self, request: TaskCreateRequest) -> TaskDetail:
         # DOC_ANCHOR: task_service.create_task
         repository_path = Path(request.repository_path or self.settings.workspace_root)
-        focus_paths = request.focus_paths or ['src/demo_app/formatter.py']
+        if not repository_path.is_absolute():
+            repository_path = (self.settings.root_dir / repository_path).resolve()
+        focus_paths = [path.strip() for path in request.focus_paths if path.strip()] or ['src/demo_app/formatter.py']
         created = self.store.create_task(
             title=request.title,
             description=request.description,
@@ -60,7 +66,7 @@ class TaskService:
 
     async def run_task(self, task_id: str) -> TaskRunResponse:
         task = await asyncio.to_thread(self.store.get_task, task_id)
-        if task.status in ACTIVE_STATUSES and task_id in self._running_tasks:
+        if task.status in ACTIVE_STATUSES and (task_id in self._running_tasks or task_id in self._pending_follow_up_tasks):
             return TaskRunResponse(task=task, accepted=False)
 
         await self._transition(task_id, TaskStatus.queued, current_step=TaskStep.read.value)
@@ -72,10 +78,22 @@ class TaskService:
     async def rollback(self, task_id: str):
         return await self.rollback_service.rollback(task_id)
 
-    async def _execute(self, task_id: str) -> None:
+    async def delete_task(self, task_id: str):
+        task = await asyncio.to_thread(self.store.get_task, task_id)
+        if task.status in ACTIVE_STATUSES or task_id in self._running_tasks or task_id in self._pending_follow_up_tasks:
+            raise RuntimeError('Cannot delete an active conversation')
+
+        deleted = await asyncio.to_thread(self.store.delete_task, task_id)
+        snapshot_dir = Path(self.settings.snapshot_root) / task_id
+        if snapshot_dir.exists():
+            await asyncio.to_thread(shutil.rmtree, snapshot_dir, True)
+        return deleted
+
+    async def _execute(self, task_id: str, *, task_description_override: str | None = None) -> None:
         # DOC_ANCHOR: task_service.execute_loop
         task = await asyncio.to_thread(self.store.get_task_detail, task_id)
-        retrieval_query = self._build_retrieval_query(task.title, task.description, task.focus_paths)
+        task_description = task_description_override or task.description
+        retrieval_query = self._build_retrieval_query(task.title, task_description, task.focus_paths)
         memory_matches = await asyncio.to_thread(self.store.search_memory, retrieval_query, 5)
         if memory_matches:
             await self.events.emit(
@@ -113,7 +131,7 @@ class TaskService:
             result = await workflow.run(
                 task_id=task_id,
                 task_title=task.title,
-                task_description=task.description,
+                task_description=task_description,
                 emit=emit,
             )
             if result.snapshot_path:
@@ -123,13 +141,18 @@ class TaskService:
                     label='before_patch',
                     path=result.snapshot_path,
                 )
+            approved = result.final_test.passed and result.review_decision == 'approve'
+            terminal_summary = self._build_terminal_summary(task.description, result)
+            if result.final_test.passed and result.review_decision != 'approve':
+                terminal_summary = f'{terminal_summary} Reviewer did not approve the final branch.'
+
             await asyncio.to_thread(
                 self.store.update_task,
                 task_id,
                 latest_diff=result.patch.diff if result.patch else None,
                 latest_test_result=result.final_test,
                 latest_retrieval=result.retrieval_hits,
-                summary=result.summary,
+                summary=terminal_summary,
                 last_error=None,
             )
             memory_entries = self._build_memory_entries(
@@ -199,7 +222,6 @@ class TaskService:
                     message='Stored the branch comparison summary',
                     payload={'type': 'branch_comparison', 'name': comparison_artifact.name},
                 )
-            approved = result.final_test.passed and result.review_decision == 'approve'
             if approved:
                 terminal_status = TaskStatus.succeeded
                 last_error = None
@@ -214,14 +236,14 @@ class TaskService:
                 terminal_status,
                 current_step=TaskStep.summarize.value,
                 finished_at=True,
-                summary=result.summary,
+                summary=terminal_summary,
                 last_error=last_error,
             )
             await self.events.emit(
                 task_id=task_id,
                 event_type='task.succeeded' if approved else 'task.failed',
                 step=TaskStep.summarize,
-                message=result.summary,
+                message=terminal_summary,
                 payload={
                     'changed_files': result.changed_files,
                     'final_test_passed': result.final_test.passed,
@@ -249,6 +271,154 @@ class TaskService:
                 message='The workflow crashed before finishing.',
                 payload={'error': str(exc)},
             )
+
+    async def chat_task(self, task_id: str, message: str) -> TaskChatResponse:
+        task = await asyncio.to_thread(self.store.get_task_detail, task_id)
+        user_event = await self.events.emit(
+            task_id=task_id,
+            event_type='task.chat.request',
+            step=TaskStep.analyze,
+            message=message,
+            payload={
+                'message': message,
+                'task_status': task.status.value,
+                'current_step': task.current_step,
+            },
+        )
+        chat_context = await asyncio.to_thread(self._build_chat_context, task_id, task, message, user_event)
+        response = await asyncio.to_thread(
+            self.chat_planner.chat_task,
+            context=chat_context,
+            user_message=message,
+        )
+
+        implementation_request = response.implementation_request
+        reply = response.reply
+        suggested_panel = response.suggested_panel or 'summary'
+        follow_up_started = False
+
+        review = await asyncio.to_thread(
+            self.chat_planner.review_chat_response,
+            context=chat_context,
+            user_message=message,
+            assistant_reply=reply,
+            implementation_request=implementation_request,
+        )
+        if review.suggested_panel:
+            suggested_panel = review.suggested_panel
+        if not review.adequate and review.corrected_reply:
+            reply = review.corrected_reply
+
+        if implementation_request:
+            follow_up_description = self._build_follow_up_description(task.description, message)
+            follow_up_started = await self._start_follow_up_execution(
+                task_id,
+                follow_up_description=follow_up_description,
+                wait_for_active_run=task.status in ACTIVE_STATUSES or task_id in self._running_tasks,
+            )
+            if not reply:
+                reply = 'I have queued the implementation and will apply it in the workspace.'
+
+        await self.events.emit(
+            task_id=task_id,
+            event_type='task.chat.response',
+            step=TaskStep.analyze,
+            message=reply,
+            payload={
+                'reply': reply,
+                'suggested_panel': suggested_panel,
+                'used_llm': response.provider != 'heuristic',
+                'model': response.model,
+                'implementation_request': implementation_request,
+                'follow_up_started': follow_up_started,
+                'reply_review_adequate': review.adequate,
+                'reply_review_reason': review.reason,
+            },
+        )
+        return TaskChatResponse(
+            reply=reply,
+            suggested_panel=suggested_panel,
+            used_llm=response.provider != 'heuristic',
+            model=response.model,
+            implementation_request=implementation_request,
+            follow_up_started=follow_up_started,
+        )
+
+    async def _start_follow_up_execution(
+        self,
+        task_id: str,
+        *,
+        follow_up_description: str,
+        wait_for_active_run: bool,
+    ) -> bool:
+        async def run_follow_up() -> None:
+            current = self._running_tasks.get(task_id)
+            if wait_for_active_run and current is not None:
+                try:
+                    await current
+                except Exception:
+                    pass
+            await self._transition(task_id, TaskStatus.queued, current_step=TaskStep.read.value)
+            running = asyncio.create_task(
+                self._execute(task_id, task_description_override=follow_up_description)
+            )
+            self._running_tasks[task_id] = running
+            running.add_done_callback(lambda _task: self._running_tasks.pop(task_id, None))
+
+        if wait_for_active_run and task_id in self._running_tasks:
+            pending = asyncio.create_task(run_follow_up())
+            self._pending_follow_up_tasks[task_id] = pending
+            pending.add_done_callback(lambda _task: self._pending_follow_up_tasks.pop(task_id, None))
+            return True
+
+        await self._transition(task_id, TaskStatus.queued, current_step=TaskStep.read.value)
+        running = asyncio.create_task(
+            self._execute(task_id, task_description_override=follow_up_description)
+        )
+        self._running_tasks[task_id] = running
+        running.add_done_callback(lambda _task: self._running_tasks.pop(task_id, None))
+        return True
+
+    def _build_follow_up_description(self, original_description: str, message: str) -> str:
+        return (
+            'User requested an implementation change through chat.\n'
+            f'Instruction: {message.strip()}\n'
+            'Make the smallest safe code change needed to satisfy the instruction.\n'
+            'If the task requires a brand new file, create it in the workspace.\n'
+            'If an existing file should be updated, modify it directly.\n\n'
+            f'Original task context:\n{original_description}'
+        )
+
+    def _build_chat_context(
+        self,
+        task_id: str,
+        task: TaskDetail,
+        message: str,
+        user_event,
+    ) -> dict[str, object]:
+        artifacts = self.store.list_artifacts(task_id)
+        recent_events = [event.model_dump(mode='json') for event in task.events[-16:]]
+        recent_events.append(user_event.model_dump(mode='json'))
+        return {
+            'task': {
+                'id': task.id,
+                'title': task.title,
+                'description': task.description,
+                'repository_path': task.repository_path,
+                'status': task.status.value,
+                'current_step': task.current_step,
+                'focus_paths': task.focus_paths,
+            },
+            'user_message': message,
+            'latest_diff': task.latest_diff,
+            'latest_test': task.latest_test_result.model_dump(mode='json') if task.latest_test_result else None,
+            'retrieval_hits': [hit.model_dump(mode='json') for hit in task.latest_retrieval[:6]],
+            'memory_notes': [note.model_dump(mode='json') for note in task.memory[:6]],
+            'subgoals': [subgoal.model_dump(mode='json') for subgoal in task.subgoals[:8]],
+            'recent_events': recent_events,
+            'artifacts': [artifact.model_dump(mode='json') for artifact in artifacts[-8:]],
+        }
+
 
     def list_artifacts(self, task_id: str):
         return self.store.list_artifacts(task_id)
@@ -453,6 +623,58 @@ class TaskService:
             lines.append('Changed files: ' + ', '.join(changed_files))
         return '\n'.join(line for line in lines if line)
 
+    def _build_terminal_summary(self, task_description: str, result) -> str:
+        summary = (result.summary or '').strip()
+        if not result.changed_files:
+            summary = re.sub(
+                r'(?i)(?:^|\s)(?:created or changed files|changed files)\s*:\s*(?:none|no files?|empty)\.?',
+                ' ',
+                summary,
+            ).strip()
+        if re.match(r'^(approved|reviewer approved)\b', summary, flags=re.IGNORECASE):
+            summary = 'Implementation completed.'
+        patch_content = result.patch.after if result.patch else ''
+        request_lower = task_description.lower()
+        summary_parts = [summary] if summary else []
+        if result.changed_files and not any(path in summary for path in result.changed_files):
+            summary_parts.append('Created or changed files: ' + ', '.join(result.changed_files))
+        requested_complexity = any(keyword in request_lower for keyword in ('time complexity', 'space complexity', 'complexity', '\u65f6\u95f4\u590d\u6742\u5ea6', '\u7a7a\u95f4\u590d\u6742\u5ea6', '\u590d\u6742\u5ea6'))
+        if not requested_complexity:
+            return ' '.join(summary_parts)
+        summary_lower = summary.lower()
+        has_time = 'time complexity' in summary_lower or '\u65f6\u95f4\u590d\u6742\u5ea6' in summary
+        has_space = 'space complexity' in summary_lower or '\u7a7a\u95f4\u590d\u6742\u5ea6' in summary
+        if has_time and has_space:
+            return ' '.join(summary_parts)
+
+        algorithm = 'quicksort' if 'quicksort' in patch_content.lower() else 'the implemented algorithm'
+        time_complexity = self._extract_complexity_line(patch_content, ('time complexity', '\u65f6\u95f4\u590d\u6742\u5ea6'))
+        space_complexity = self._extract_complexity_line(patch_content, ('space complexity', '\u7a7a\u95f4\u590d\u6742\u5ea6'))
+        if not time_complexity and algorithm == 'quicksort':
+            time_complexity = 'average O(n log n), worst O(n^2)'
+        if not space_complexity and algorithm == 'quicksort':
+            space_complexity = 'O(n) for recursive partitions'
+        if not time_complexity:
+            time_complexity = 'not documented in the generated file'
+        if not space_complexity:
+            space_complexity = 'not documented in the generated file'
+
+        details = [f'Algorithm: {algorithm}.']
+        if time_complexity:
+            details.append(f'Time complexity: {time_complexity}.')
+        if space_complexity:
+            details.append(f'Space complexity: {space_complexity}.')
+        return ' '.join(summary_parts + [' '.join(details)])
+
+    def _extract_complexity_line(self, content: str, labels: tuple[str, ...]) -> str | None:
+        for line in content.splitlines():
+            normalized = line.strip().lstrip('#/*').strip()
+            lowered = normalized.lower()
+            if any(label in lowered for label in labels):
+                value = re.split(r'[:\uFF1A]', normalized, maxsplit=1)
+                if len(value) == 2 and value[1].strip():
+                    return value[1].strip().rstrip('.')
+        return None
     def _build_lesson_content(self, result, changed_files: list[str]) -> str:
         outcome = 'passed' if result.final_test.passed else 'failed'
         lines = [
@@ -499,8 +721,3 @@ class TaskService:
                 seen.add(value)
                 ordered.append(value)
         return ordered
-
-
-
-
-

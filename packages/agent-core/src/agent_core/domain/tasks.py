@@ -19,7 +19,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.failed,
     },
     TaskStatus.rolled_back: {TaskStatus.queued, TaskStatus.failed},
-    TaskStatus.succeeded: {TaskStatus.rolled_back},
+    TaskStatus.succeeded: {TaskStatus.queued, TaskStatus.rolled_back},
     TaskStatus.failed: {TaskStatus.queued, TaskStatus.cancelled, TaskStatus.rolled_back},
     TaskStatus.cancelled: set(),
 }
