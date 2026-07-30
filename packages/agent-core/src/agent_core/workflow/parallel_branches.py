@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Any
+from operator import add
+from typing import Annotated, Awaitable, Callable, Any, TypedDict
 
 from assistant_shared.models import RetrievalHit, TaskStep, TestOutcome
 
@@ -30,6 +31,14 @@ class ParallelBranchSelection:
     candidates: list[BranchCandidate]
 
 
+class ParallelBranchGraphState(TypedDict, total=False):
+    specs: list[dict[str, str]]
+    request: dict[str, Any]
+    spec: dict[str, str]
+    candidates: Annotated[list[BranchCandidate], add]
+    selection: ParallelBranchSelection
+
+
 async def choose_parallel_branch(
     # DOC_ANCHOR: parallel_branches.choose
     workflow: Any,
@@ -47,33 +56,74 @@ async def choose_parallel_branch(
     branch_history: list[dict[str, object]],
     emit: Callable[[str, TaskStep | str, str, dict | None], Awaitable[None]],
 ) -> ParallelBranchSelection:
-    specs = [
-        {
-            'agent': 'planner',
-            'profile': 'balanced',
-            'hint': 'Choose the smallest safe patch that makes the tests pass.',
-        },
-        {
-            'agent': 'critic',
-            'profile': 'conservative',
-            'hint': 'Prefer more context or a narrower change when uncertain.',
-        },
-        {
-            'agent': 'memory',
-            'profile': 'memory-aware',
-            'hint': 'Use prior memory and related files to avoid repeat mistakes.',
-        },
-        {
-            'agent': 'explorer',
-            'profile': 'broad-context',
-            'hint': 'Widen the search when the current branch does not explain the failure.',
-        },
-        {
-            'agent': 'verifier',
-            'profile': 'test-focused',
-            'hint': 'Favor reading tests, validating the fix, and ending only when the state is safe.',
-        },
-    ]
+    try:
+        from langgraph.graph import END, START, StateGraph
+        from langgraph.types import Send
+    except ImportError:
+        return await _choose_parallel_branch_fallback(
+            workflow, turn=turn, task_title=task_title, task_description=task_description,
+            retrieval_hits=retrieval_hits, discovered=discovered, baseline=baseline,
+            latest_test=latest_test, patch_applied=patch_applied, changed_files=changed_files,
+            review_feedback=review_feedback, branch_history=branch_history, emit=emit,
+        )
+
+    specs = _branch_specs()
+    request = {
+        'turn': turn,
+        'task_title': task_title,
+        'task_description': task_description,
+        'retrieval_hits': retrieval_hits,
+        'discovered': discovered,
+        'baseline': baseline,
+        'latest_test': latest_test,
+        'patch_applied': patch_applied,
+        'changed_files': changed_files,
+        'review_feedback': review_feedback,
+        'branch_history': branch_history,
+    }
+
+    def dispatch(state: ParallelBranchGraphState):
+        return [Send('build_candidate', {'request': state['request'], 'spec': spec}) for spec in state['specs']]
+
+    async def build_candidate(state: ParallelBranchGraphState) -> dict[str, object]:
+        candidate = await _build_candidate(workflow, **state['request'], spec=state['spec'], emit=emit)
+        return {'candidates': [candidate]}
+
+    async def select_candidate(state: ParallelBranchGraphState) -> dict[str, object]:
+        selection = await _select_parallel_branch(
+            workflow, candidates=state['candidates'], turn=turn, latest_test=latest_test,
+            patch_applied=patch_applied, changed_files=changed_files, discovered=discovered, emit=emit,
+        )
+        return {'selection': selection}
+
+    graph = StateGraph(ParallelBranchGraphState)
+    graph.add_node('build_candidate', build_candidate)
+    graph.add_node('select_candidate', select_candidate)
+    graph.add_conditional_edges(START, dispatch, ['build_candidate'])
+    graph.add_edge('build_candidate', 'select_candidate')
+    graph.add_edge('select_candidate', END)
+    result = await graph.compile().ainvoke({'specs': specs, 'request': request, 'candidates': []})
+    return result['selection']
+
+
+async def _choose_parallel_branch_fallback(
+    # DOC_ANCHOR: parallel_branches.fallback_choose
+    workflow: Any,
+    *,
+    turn: int,
+    task_title: str,
+    task_description: str,
+    retrieval_hits: list[RetrievalHit],
+    discovered: dict[str, str],
+    baseline: TestOutcome,
+    latest_test: TestOutcome,
+    patch_applied: bool,
+    changed_files: list[str],
+    review_feedback: dict[str, object] | None,
+    branch_history: list[dict[str, object]],
+    emit: Callable[[str, TaskStep | str, str, dict | None], Awaitable[None]],
+) -> ParallelBranchSelection:
+    specs = _branch_specs()
 
     if not workflow.llm_planner.enabled:
         await emit(
@@ -107,34 +157,52 @@ async def choose_parallel_branch(
         for spec in specs
     ]
     candidates = await asyncio.gather(*plans)
-    selected = max(candidates, key=lambda item: _score_candidate(workflow, item, latest_test=latest_test, patch_applied=patch_applied, changed_files=changed_files, discovered=discovered))
+    return await _select_parallel_branch(
+        workflow, candidates=candidates, turn=turn, latest_test=latest_test,
+        patch_applied=patch_applied, changed_files=changed_files, discovered=discovered, emit=emit,
+    )
+
+
+def _branch_specs() -> list[dict[str, str]]:
+    return [
+        {'agent': 'planner', 'profile': 'balanced', 'hint': 'Choose the smallest safe patch that makes the tests pass.'},
+        {'agent': 'critic', 'profile': 'conservative', 'hint': 'Prefer more context or a narrower change when uncertain.'},
+        {'agent': 'memory', 'profile': 'memory-aware', 'hint': 'Use prior memory and related files to avoid repeat mistakes.'},
+        {'agent': 'explorer', 'profile': 'broad-context', 'hint': 'Widen the search when the current branch does not explain the failure.'},
+        {'agent': 'verifier', 'profile': 'test-focused', 'hint': 'Favor reading tests, validating the fix, and ending only when the state is safe.'},
+    ]
+
+
+async def _select_parallel_branch(
+    workflow: Any,
+    *,
+    candidates: list[BranchCandidate],
+    turn: int,
+    latest_test: TestOutcome,
+    patch_applied: bool,
+    changed_files: list[str],
+    discovered: dict[str, str],
+    emit: Callable[[str, TaskStep | str, str, dict | None], Awaitable[None]],
+) -> ParallelBranchSelection:
+    selected = max(candidates, key=lambda item: _score_candidate(
+        workflow, item, latest_test=latest_test, patch_applied=patch_applied,
+        changed_files=changed_files, discovered=discovered,
+    ))
     for candidate in candidates:
         candidate.selected = candidate.branch_id == selected.branch_id
-
     await emit(
-        'branch.selected',
-        TaskStep.analyze,
-        f'Selected {selected.branch_id}',
+        'branch.selected', TaskStep.analyze, f'Selected {selected.branch_id}',
         {
-            'branch': selected.branch_id,
-            'turn': turn,
-            'agent': selected.agent,
-            'profile': selected.profile,
-            'action': selected.decision.action,
-            'summary': selected.decision.summary,
-            'rationale': selected.decision.rationale,
+            'branch': selected.branch_id, 'turn': turn, 'agent': selected.agent,
+            'profile': selected.profile, 'action': selected.decision.action,
+            'summary': selected.decision.summary, 'rationale': selected.decision.rationale,
             'candidate_count': len(candidates),
             'candidates': [
                 {
-                    'branch': candidate.branch_id,
-                    'agent': candidate.agent,
-                    'profile': candidate.profile,
-                    'action': candidate.decision.action,
-                    'summary': candidate.decision.summary,
-                    'rationale': candidate.decision.rationale,
-                    'files_to_read': candidate.decision.files_to_read,
-                    'score': candidate.score,
-                    'selected': candidate.selected,
+                    'branch': candidate.branch_id, 'agent': candidate.agent, 'profile': candidate.profile,
+                    'action': candidate.decision.action, 'summary': candidate.decision.summary,
+                    'rationale': candidate.decision.rationale, 'files_to_read': candidate.decision.files_to_read,
+                    'score': candidate.score, 'selected': candidate.selected,
                 }
                 for candidate in candidates
             ],
@@ -142,12 +210,8 @@ async def choose_parallel_branch(
         },
     )
     return ParallelBranchSelection(
-        branch_id=selected.branch_id,
-        agent=selected.agent,
-        profile=selected.profile,
-        decision=selected.decision,
-        score=selected.score,
-        candidates=candidates,
+        branch_id=selected.branch_id, agent=selected.agent, profile=selected.profile,
+        decision=selected.decision, score=selected.score, candidates=candidates,
     )
 
 

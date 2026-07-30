@@ -135,3 +135,4 @@ def _load_env_file(path: Path) -> None:
         value = value.strip().strip("'\"")
         if key and key not in os.environ:
             os.environ[key] = value
+

@@ -1,3 +1,3 @@
-from .pipeline import DemoWorkflow, WorkflowResult
+from .pipeline import CodeTaskWorkflow, WorkflowResult
 
-__all__ = ["DemoWorkflow", "WorkflowResult"]
+__all__ = ["CodeTaskWorkflow", "WorkflowResult"]

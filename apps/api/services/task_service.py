@@ -9,8 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 from assistant_shared.models import SubgoalStatus, TaskChatResponse, TaskCreateRequest, TaskDetail, TaskRunResponse, TaskStatus, TaskStep
-from agent_core import DemoWorkflow, advance_status
+from agent_core import CodeTaskWorkflow, advance_status
 from agent_core.llm import OpenAIPlanner
+from agent_core.workflow.langgraph_workflow import LangGraphUnavailable, run_chat_graph
 
 from apps.api.core.config import Settings
 from apps.api.services.event_service import EventService
@@ -91,170 +92,60 @@ class TaskService:
 
     async def _execute(self, task_id: str, *, task_description_override: str | None = None) -> None:
         # DOC_ANCHOR: task_service.execute_loop
+        from agent_core.workflow.langgraph_workflow import run_task_lifecycle_graph
+
         task = await asyncio.to_thread(self.store.get_task_detail, task_id)
         task_description = task_description_override or task.description
-        retrieval_query = self._build_retrieval_query(task.title, task_description, task.focus_paths)
-        memory_matches = await asyncio.to_thread(self.store.search_memory, retrieval_query, 5)
-        if memory_matches:
-            await self.events.emit(
-                task_id=task_id,
-                event_type='memory.loaded',
-                step=TaskStep.read,
-                message=f'Loaded {len(memory_matches)} relevant memory record(s)',
-                payload={
-                    'query': retrieval_query,
-                    'matches': [memory.model_dump(mode='json') for memory in memory_matches],
-                },
-            )
-        await self._transition(task_id, TaskStatus.reading, current_step=TaskStep.read.value, started_at=True)
-        workflow = DemoWorkflow(
-            workspace_root=task.repository_path,
-            focus_paths=task.focus_paths,
-            snapshot_root=self.settings.snapshot_root,
-            allowed_commands=self.settings.allowed_commands,
-            llm_config=asdict(self.settings.llm_config),
-            memory_notes=memory_matches,
-        )
+        context: dict[str, object] = {}
 
-        async def emit(event_type: str, step: TaskStep | str, message: str, payload: dict | None = None) -> None:
-            stored = await self.events.emit(
-                task_id=task_id,
-                event_type=event_type,
-                step=step,
-                message=message,
-                payload=payload or {},
+        async def prepare() -> None:
+            retrieval_query = self._build_retrieval_query(task.title, task_description, task.focus_paths)
+            memory_matches = await asyncio.to_thread(self.store.search_memory, retrieval_query, 5)
+            if memory_matches:
+                await self.events.emit(
+                    task_id=task_id,
+                    event_type='memory.loaded',
+                    step=TaskStep.read,
+                    message=f'Loaded {len(memory_matches)} relevant memory record(s)',
+                    payload={
+                        'query': retrieval_query,
+                        'matches': [memory.model_dump(mode='json') for memory in memory_matches],
+                    },
+                )
+            await self._transition(task_id, TaskStatus.reading, current_step=TaskStep.read.value, started_at=True)
+            workflow = CodeTaskWorkflow(
+                workspace_root=task.repository_path,
+                focus_paths=task.focus_paths,
+                snapshot_root=self.settings.snapshot_root,
+                allowed_commands=self.settings.allowed_commands,
+                llm_config=asdict(self.settings.llm_config),
+                memory_notes=memory_matches,
             )
-            await self._apply_goal_event(task_id, stored.type, stored.payload)
-            await self._apply_progress_event(task_id, stored.type, stored.step, stored.payload)
+
+            async def emit(event_type: str, step: TaskStep | str, message: str, payload: dict | None = None) -> None:
+                stored = await self.events.emit(
+                    task_id=task_id, event_type=event_type, step=step, message=message, payload=payload or {},
+                )
+                await self._apply_goal_event(task_id, stored.type, stored.payload)
+                await self._apply_progress_event(task_id, stored.type, stored.step, stored.payload)
+
+            context['workflow'] = workflow
+            context['emit'] = emit
+
+        async def execute() -> object:
+            workflow = context['workflow']
+            emit = context['emit']
+            return await workflow.run(
+                task_id=task_id, task_title=task.title, task_description=task_description, emit=emit,
+            )
+
+        async def persist(result) -> None:
+            await self._persist_workflow_result(
+                task_id=task_id, task=task, task_description=task_description, result=result,
+            )
 
         try:
-            result = await workflow.run(
-                task_id=task_id,
-                task_title=task.title,
-                task_description=task_description,
-                emit=emit,
-            )
-            if result.snapshot_path:
-                await asyncio.to_thread(
-                    self.store.create_snapshot,
-                    task_id=task_id,
-                    label='before_patch',
-                    path=result.snapshot_path,
-                )
-            approved = result.final_test.passed and result.review_decision == 'approve'
-            terminal_summary = self._build_terminal_summary(task.description, result)
-            if result.final_test.passed and result.review_decision != 'approve':
-                terminal_summary = f'{terminal_summary} Reviewer did not approve the final branch.'
-
-            await asyncio.to_thread(
-                self.store.update_task,
-                task_id,
-                latest_diff=result.patch.diff if result.patch else None,
-                latest_test_result=result.final_test,
-                latest_retrieval=result.retrieval_hits,
-                summary=terminal_summary,
-                last_error=None,
-            )
-            memory_entries = self._build_memory_entries(
-                task_title=task.title,
-                task_description=task.description,
-                result=result,
-            )
-            for index, entry in enumerate(memory_entries, start=1):
-                stored_memory = await asyncio.to_thread(
-                    self.store.create_memory,
-                    task_id=task_id,
-                    kind=str(entry['kind']),
-                    title=str(entry['title']),
-                    content=str(entry['content']),
-                    keywords=list(entry['keywords']),
-                    related_files=list(entry['related_files']),
-                )
-                await self.events.emit(
-                    task_id=task_id,
-                    event_type='memory.created',
-                    step=TaskStep.summarize,
-                    message=f"Stored memory note {index}/{len(memory_entries)}: {entry['kind']}",
-                    payload={'memory': stored_memory.model_dump(mode='json'), 'memory_kind': entry['kind']},
-                )
-            if result.patch:
-                await asyncio.to_thread(
-                    self.store.create_artifact,
-                    task_id=task_id,
-                    type='diff',
-                    name=Path(result.patch.path).name,
-                    content=result.patch.diff,
-                )
-                await self.events.emit(
-                    task_id=task_id,
-                    event_type='artifact.created',
-                    step=TaskStep.patch,
-                    message='Stored the workspace diff',
-                    payload={'type': 'diff', 'name': Path(result.patch.path).name},
-                )
-            await asyncio.to_thread(
-                self.store.create_artifact,
-                task_id=task_id,
-                type='test_report',
-                name='final pytest result',
-                content=json.dumps(result.final_test.model_dump(mode='json'), ensure_ascii=False),
-            )
-            await self.events.emit(
-                task_id=task_id,
-                event_type='artifact.created',
-                step=TaskStep.test,
-                message='Stored the final test report',
-                payload={'type': 'test_report', 'name': 'final pytest result'},
-            )
-            if result.branch_comparison:
-                # DOC_ANCHOR: task_service.branch_comparison_artifact
-                comparison_artifact = await asyncio.to_thread(
-                    self.store.create_artifact,
-                    task_id=task_id,
-                    type='branch_comparison',
-                    name='branch comparison summary',
-                    content=json.dumps(result.branch_comparison, ensure_ascii=False, indent=2),
-                )
-                await self.events.emit(
-                    task_id=task_id,
-                    event_type='artifact.created',
-                    step=TaskStep.summarize,
-                    message='Stored the branch comparison summary',
-                    payload={'type': 'branch_comparison', 'name': comparison_artifact.name},
-                )
-            if approved:
-                terminal_status = TaskStatus.succeeded
-                last_error = None
-            else:
-                terminal_status = TaskStatus.failed
-                if result.final_test.passed:
-                    last_error = 'Reviewer did not approve the final branch'
-                else:
-                    last_error = 'Tests failed after applying the patch'
-            await self._transition(
-                task_id,
-                terminal_status,
-                current_step=TaskStep.summarize.value,
-                finished_at=True,
-                summary=terminal_summary,
-                last_error=last_error,
-            )
-            await self.events.emit(
-                task_id=task_id,
-                event_type='task.succeeded' if approved else 'task.failed',
-                step=TaskStep.summarize,
-                message=terminal_summary,
-                payload={
-                    'changed_files': result.changed_files,
-                    'final_test_passed': result.final_test.passed,
-                    'snapshot_path': result.snapshot_path,
-                    'plan_source': result.plan_source,
-                    'llm_used': result.llm_used,
-                    'llm_model': result.llm_model,
-                    'branch_count': result.branch_count,
-                    'review_decision': result.review_decision,
-                },
-            )
+            await run_task_lifecycle_graph(prepare=prepare, execute=execute, persist=persist)
         except Exception as exc:  # pragma: no cover - surfaced in task status and tests
             await self._transition(
                 task_id,
@@ -272,6 +163,130 @@ class TaskService:
                 payload={'error': str(exc)},
             )
 
+
+    async def _persist_workflow_result(self, *, task_id: str, task: TaskDetail, task_description: str, result) -> None:
+        if result.snapshot_path:
+            await asyncio.to_thread(
+                self.store.create_snapshot,
+                task_id=task_id,
+                label='before_patch',
+                path=result.snapshot_path,
+            )
+        approved = result.final_test.passed and result.review_decision == 'approve'
+        terminal_summary = self._build_terminal_summary(task.description, result)
+        if result.final_test.passed and result.review_decision != 'approve':
+            terminal_summary = f'{terminal_summary} Reviewer did not approve the final branch.'
+
+        await asyncio.to_thread(
+            self.store.update_task,
+            task_id,
+            latest_diff=result.patch.diff if result.patch else None,
+            latest_test_result=result.final_test,
+            latest_retrieval=result.retrieval_hits,
+            summary=terminal_summary,
+            last_error=None,
+        )
+        memory_entries = self._build_memory_entries(
+            task_title=task.title,
+            task_description=task.description,
+            result=result,
+        )
+        for index, entry in enumerate(memory_entries, start=1):
+            stored_memory = await asyncio.to_thread(
+                self.store.create_memory,
+                task_id=task_id,
+                kind=str(entry['kind']),
+                title=str(entry['title']),
+                content=str(entry['content']),
+                keywords=list(entry['keywords']),
+                related_files=list(entry['related_files']),
+            )
+            await self.events.emit(
+                task_id=task_id,
+                event_type='memory.created',
+                step=TaskStep.summarize,
+                message=f"Stored memory note {index}/{len(memory_entries)}: {entry['kind']}",
+                payload={'memory': stored_memory.model_dump(mode='json'), 'memory_kind': entry['kind']},
+            )
+        if result.patch:
+            await asyncio.to_thread(
+                self.store.create_artifact,
+                task_id=task_id,
+                type='diff',
+                name=Path(result.patch.path).name,
+                content=result.patch.diff,
+            )
+            await self.events.emit(
+                task_id=task_id,
+                event_type='artifact.created',
+                step=TaskStep.patch,
+                message='Stored the workspace diff',
+                payload={'type': 'diff', 'name': Path(result.patch.path).name},
+            )
+        await asyncio.to_thread(
+            self.store.create_artifact,
+            task_id=task_id,
+            type='test_report',
+            name='final pytest result',
+            content=json.dumps(result.final_test.model_dump(mode='json'), ensure_ascii=False),
+        )
+        await self.events.emit(
+            task_id=task_id,
+            event_type='artifact.created',
+            step=TaskStep.test,
+            message='Stored the final test report',
+            payload={'type': 'test_report', 'name': 'final pytest result'},
+        )
+        if result.branch_comparison:
+            # DOC_ANCHOR: task_service.branch_comparison_artifact
+            comparison_artifact = await asyncio.to_thread(
+                self.store.create_artifact,
+                task_id=task_id,
+                type='branch_comparison',
+                name='branch comparison summary',
+                content=json.dumps(result.branch_comparison, ensure_ascii=False, indent=2),
+            )
+            await self.events.emit(
+                task_id=task_id,
+                event_type='artifact.created',
+                step=TaskStep.summarize,
+                message='Stored the branch comparison summary',
+                payload={'type': 'branch_comparison', 'name': comparison_artifact.name},
+            )
+        if approved:
+            terminal_status = TaskStatus.succeeded
+            last_error = None
+        else:
+            terminal_status = TaskStatus.failed
+            if result.final_test.passed:
+                last_error = 'Reviewer did not approve the final branch'
+            else:
+                last_error = 'Tests failed after applying the patch'
+        await self._transition(
+            task_id,
+            terminal_status,
+            current_step=TaskStep.summarize.value,
+            finished_at=True,
+            summary=terminal_summary,
+            last_error=last_error,
+        )
+        await self.events.emit(
+            task_id=task_id,
+            event_type='task.succeeded' if approved else 'task.failed',
+            step=TaskStep.summarize,
+            message=terminal_summary,
+            payload={
+                'changed_files': result.changed_files,
+                'final_test_passed': result.final_test.passed,
+                'snapshot_path': result.snapshot_path,
+                'plan_source': result.plan_source,
+                'llm_used': result.llm_used,
+                'llm_model': result.llm_model,
+                'branch_count': result.branch_count,
+                'review_decision': result.review_decision,
+            },
+        )
+
     async def chat_task(self, task_id: str, message: str) -> TaskChatResponse:
         task = await asyncio.to_thread(self.store.get_task_detail, task_id)
         user_event = await self.events.emit(
@@ -286,38 +301,37 @@ class TaskService:
             },
         )
         chat_context = await asyncio.to_thread(self._build_chat_context, task_id, task, message, user_event)
-        response = await asyncio.to_thread(
-            self.chat_planner.chat_task,
-            context=chat_context,
-            user_message=message,
-        )
+        try:
+            chat_state = await run_chat_graph(
+                planner=self.chat_planner,
+                context=chat_context,
+                user_message=message,
+            )
+            response = chat_state['response']
+            review = chat_state['review']
+            chat_route = chat_state.get('route', response.intent)
+        except LangGraphUnavailable:
+            response = await asyncio.to_thread(
+                self.chat_planner.chat_task,
+                context=chat_context,
+                user_message=message,
+            )
+            chat_route = 'implementation' if response.implementation_request else response.intent
+            review = await asyncio.to_thread(
+                self.chat_planner.review_chat_response,
+                context=chat_context,
+                user_message=message,
+                assistant_reply=response.reply,
+                implementation_request=response.implementation_request,
+            )
 
-        implementation_request = response.implementation_request
+        implementation_request = chat_route == 'implementation' and response.implementation_request
         reply = response.reply
-        suggested_panel = response.suggested_panel or 'summary'
-        follow_up_started = False
-
-        review = await asyncio.to_thread(
-            self.chat_planner.review_chat_response,
-            context=chat_context,
-            user_message=message,
-            assistant_reply=reply,
-            implementation_request=implementation_request,
-        )
-        if review.suggested_panel:
-            suggested_panel = review.suggested_panel
+        suggested_panel = review.suggested_panel or response.suggested_panel or 'summary'
         if not review.adequate and review.corrected_reply:
             reply = review.corrected_reply
-
-        if implementation_request:
-            follow_up_description = self._build_follow_up_description(task.description, message)
-            follow_up_started = await self._start_follow_up_execution(
-                task_id,
-                follow_up_description=follow_up_description,
-                wait_for_active_run=task.status in ACTIVE_STATUSES or task_id in self._running_tasks,
-            )
-            if not reply:
-                reply = 'I have queued the implementation and will apply it in the workspace.'
+        if implementation_request and not reply:
+            reply = 'I have queued the implementation and will apply it in the workspace.'
 
         await self.events.emit(
             task_id=task_id,
@@ -330,11 +344,28 @@ class TaskService:
                 'used_llm': response.provider != 'heuristic',
                 'model': response.model,
                 'implementation_request': implementation_request,
-                'follow_up_started': follow_up_started,
+                'follow_up_started': False,
                 'reply_review_adequate': review.adequate,
                 'reply_review_reason': review.reason,
             },
         )
+
+        follow_up_started = False
+        if implementation_request:
+            follow_up_description = self._build_follow_up_description(task.description, message)
+            follow_up_started = await self._start_follow_up_execution(
+                task_id,
+                follow_up_description=follow_up_description,
+                wait_for_active_run=task.status in ACTIVE_STATUSES or task_id in self._running_tasks,
+            )
+            if follow_up_started:
+                await self.events.emit(
+                    task_id=task_id,
+                    event_type='task.chat.follow_up.started',
+                    step=TaskStep.analyze,
+                    message='Queued the implementation follow-up.',
+                    payload={'message': message},
+                )
         return TaskChatResponse(
             reply=reply,
             suggested_panel=suggested_panel,

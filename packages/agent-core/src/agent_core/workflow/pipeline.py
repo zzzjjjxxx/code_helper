@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -62,8 +62,8 @@ class ReactLoopResult:
     branch_comparison: dict[str, object]
 
 
-class DemoWorkflow:
-    # DOC_ANCHOR: workflow.demo
+class CodeTaskWorkflow:
+    # DOC_ANCHOR: workflow.code_task
     def __init__(
         self,
         workspace_root: str | Path,
@@ -153,92 +153,63 @@ class DemoWorkflow:
                 'subgoals': [self._serialize_subgoal(task_id, subgoal, status='planned') for subgoal in planned_goals],
             },
         )
-        first_goal = planned_goals[0] if len(planned_goals) > 0 else None
-        second_goal = planned_goals[1] if len(planned_goals) > 1 else None
-        third_goal = planned_goals[2] if len(planned_goals) > 2 else None
-        if first_goal is not None:
+        from .langgraph_workflow import run_subgoal_graph
+
+        async def inspect_goal() -> TestOutcome:
+            baseline = await self._run_tests(emit=emit, step=TaskStep.analyze, label='baseline')
             await emit(
-                'goal.started',
-                self._goal_event_step(first_goal),
-                f'Started goal: {first_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, first_goal, status='completed')},
+                'test.completed', TaskStep.analyze, 'Captured baseline test results',
+                {
+                    'passed': baseline.passed,
+                    'return_code': baseline.return_code,
+                    'stdout': baseline.stdout,
+                    'stderr': baseline.stderr,
+                    'command': baseline.command,
+                    'duration_ms': baseline.duration_ms,
+                },
+            )
+            return baseline
+
+        async def implement_goal(baseline: TestOutcome) -> ReactLoopResult:
+            return await self._run_collaborative_loop(
+                task_id=task_id,
+                task_title=task_title,
+                task_description=task_description,
+                retrieval_hits=retrieval_hits,
+                discovered=discovered,
+                baseline=baseline,
+                emit=emit,
             )
 
-        baseline = await self._run_tests(emit=emit, step=TaskStep.analyze, label='baseline')
-        if first_goal is not None:
+        async def verify_goal(react: ReactLoopResult) -> str:
+            summary = react.summary
             await emit(
-                'goal.completed',
-                self._goal_event_step(first_goal),
-                f'Completed goal: {first_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, first_goal, status='completed')},
+                'task.summarized', TaskStep.summarize, summary,
+                {
+                    'summary': summary,
+                    'changed_files': react.changed_files,
+                    'retrieval_hits': len(retrieval_hits),
+                    'memory_notes': len(self.memory_notes),
+                    'plan_source': react.plan_source,
+                    'llm_used': react.llm_used,
+                    'react_turns': react.react_turns,
+                },
             )
-        if second_goal is not None:
-            await emit(
-                'goal.started',
-                self._goal_event_step(second_goal),
-                f'Started goal: {second_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, second_goal, status='completed')},
-            )
-        await emit(
-            'test.completed',
-            TaskStep.analyze,
-            'Captured baseline test results',
-            {
-                'passed': baseline.passed,
-                'return_code': baseline.return_code,
-                'stdout': baseline.stdout,
-                'stderr': baseline.stderr,
-                'command': baseline.command,
-                'duration_ms': baseline.duration_ms,
-            },
-        )
+            return summary
 
-        react = await self._run_collaborative_loop(
+        subgoal_state = await run_subgoal_graph(
             task_id=task_id,
-            task_title=task_title,
-            task_description=task_description,
-            retrieval_hits=retrieval_hits,
-            discovered=discovered,
-            baseline=baseline,
+            goals=planned_goals,
             emit=emit,
+            serialize_goal=self._serialize_subgoal,
+            goal_step=self._goal_event_step,
+            inspect=inspect_goal,
+            implement=implement_goal,
+            verify=verify_goal,
         )
-        if second_goal is not None:
-            await emit(
-                'goal.completed',
-                self._goal_event_step(second_goal),
-                f'Completed goal: {second_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, second_goal, status='completed')},
-            )
-        if third_goal is not None:
-            await emit(
-                'goal.started',
-                self._goal_event_step(third_goal),
-                f'Started goal: {third_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, third_goal, status='active')},
-            )
-        summary = react.summary
-        await emit(
-            'task.summarized',
-            TaskStep.summarize,
-            summary,
-            {
-                'summary': summary,
-                'changed_files': react.changed_files,
-                'retrieval_hits': len(retrieval_hits),
-                'memory_notes': len(self.memory_notes),
-                'plan_source': react.plan_source,
-                'llm_used': react.llm_used,
-                'react_turns': react.react_turns,
-            },
-        )
-        if third_goal is not None:
-            await emit(
-                'goal.completed',
-                self._goal_event_step(third_goal),
-                f'Completed goal: {third_goal.title}',
-                {'subgoal': self._serialize_subgoal(task_id, third_goal, status='completed')},
-            )
-
+        baseline = subgoal_state['baseline']
+        react = subgoal_state['react']
+        summary = subgoal_state['summary']
         return WorkflowResult(
             summary=summary,
             patch=react.patch,
@@ -340,6 +311,72 @@ class DemoWorkflow:
         return payload
 
     async def _run_collaborative_loop(
+        # DOC_ANCHOR: workflow.collaborative_loop.langgraph
+        self,
+        *,
+        task_id: str,
+        task_title: str,
+        task_description: str,
+        retrieval_hits: list[RetrievalHit],
+        discovered: dict[str, str],
+        baseline: TestOutcome,
+        emit: Callable[[str, TaskStep | str, str, dict | None], Awaitable[None]],
+    ) -> ReactLoopResult:
+        from .langgraph_workflow import LangGraphUnavailable, run_agent_graph
+
+        try:
+            state = await run_agent_graph(
+                workflow=self,
+                emit=emit,
+                thread_id=task_id,
+                initial_state={
+                'task_id': task_id,
+                'task_title': task_title,
+                'task_description': task_description,
+                'retrieval_hits': retrieval_hits,
+                'current_context': dict(discovered),
+                'baseline': baseline,
+                'final_test': baseline,
+                'max_turns': 4,
+                'turn': 0,
+                'branch_history': [],
+                'review_feedback': None,
+                'pending_files': [],
+                'changed_files': [],
+                'patch_applied': False,
+                'llm_used': False,
+                'plan_source': 'heuristic',
+                'review_decision': 'pending',
+            })
+        except LangGraphUnavailable:
+            return await self._run_collaborative_loop_fallback(
+                task_id=task_id,
+                task_title=task_title,
+                task_description=task_description,
+                retrieval_hits=retrieval_hits,
+                discovered=discovered,
+                baseline=baseline,
+                emit=emit,
+            )
+
+        history = state.get('branch_history', [])
+        return ReactLoopResult(
+            summary=state.get('summary') or self._summarize_outcome(state['final_test'], state.get('changed_files', [])),
+            patch=state.get('patch'),
+            final_test=state['final_test'],
+            snapshot_path=state.get('snapshot_path'),
+            changed_files=state.get('changed_files', []),
+            llm_used=state.get('llm_used', False),
+            plan_source=state.get('plan_source', 'heuristic'),
+            llm_model=state.get('llm_model'),
+            react_turns=state.get('turn', 0),
+            branch_count=self._count_explored_branches(history),
+            review_decision=state.get('review_decision', 'pending'),
+            subgoal_count=0,
+            branch_comparison=state.get('branch_comparison', {}),
+        )
+
+    async def _run_collaborative_loop_fallback(
         # DOC_ANCHOR: workflow.collaborative_loop
         self,
         *,
@@ -943,16 +980,6 @@ class DemoWorkflow:
                 proposal=proposal,
                 final_test=final_test,
                 changed_files=changed_files,
-            )
-
-        if final_test.passed and review.action != 'approve':
-            review = ReviewDecision(
-                action='approve',
-                summary=review.summary or self._summarize_outcome(final_test, changed_files),
-                rationale=review.rationale or 'Passing tests override a non-approve reviewer response.',
-                files_to_read=review.files_to_read,
-                model=review.model or 'heuristic',
-                provider=review.provider or 'heuristic',
             )
 
         await emit(

@@ -31,7 +31,7 @@
 
 ### Agent 层
 
-- [工作流主类](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)：任务如何被读、被规划、被修改、被验证。
+- [工作流主类](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L61>)：任务如何被读、被规划、被修改、被验证。
 - [并行分支选择](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)：同一轮里让多个角色同时出方案。
 - [LLM 封装](<../packages/agent-core/src/agent_core/llm.py#L65>)：把状态发给模型，再把 JSON 结果解析回来。
 
@@ -181,7 +181,7 @@
 
 ## 9. 真正的工作流在哪里
 
-[ `DemoWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>) 是主工作流。
+[ `CodeTaskWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L61>) 是主工作流。
 
 它做的是：
 
@@ -193,11 +193,11 @@
 
 ### 关键代码
 
-- [工作流入口 `run`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L81>)
-- [协作循环 `_run_collaborative_loop`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L335>)
-- [状态构造 `_build_react_state`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L941>)
-- [分支比较 `_build_branch_comparison`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L984>)
-- [测试执行 `_run_tests`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1233>)
+- [工作流入口 `run`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L85>)
+- [协作循环 `_run_collaborative_loop`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L313>)
+- [状态构造 `_build_react_state`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1052>)
+- [分支比较 `_build_branch_comparison`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1095>)
+- [测试执行 `_run_tests`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1451>)
 
 ## 10. 多 Agent 协作现在怎么做
 
@@ -356,7 +356,7 @@
 2. [ `docs/technical_guide.md`](<../docs/technical_guide.md#L1>)
 3. [ `apps/api/main.py`](<../apps/api/main.py#L17>)
 4. [ `apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L28>)
-5. [ `packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
+5. [ `packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L61>)
 6. [ `packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
 7. [ `apps/web/src/components/TaskDetail.tsx`](<../apps/web/src/components/TaskDetail.tsx#L140>)
 8. [ `apps/web/src/components/BranchComparisonPanel.tsx`](<../apps/web/src/components/BranchComparisonPanel.tsx#L333>)
@@ -370,9 +370,9 @@
 - `task_service.branch_comparison_artifact` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L187>)
 - `task_service.progress_mapper` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L296>)
 - `task_service.transition` -> [`apps/api/services/task_service.py`](<../apps/api/services/task_service.py#L256>)
-- `workflow.demo` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L64>)
-- `workflow.run` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L82>)
-- `workflow.collaborative_loop` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L337>)
+- `workflow.code_task` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L61>)
+- `workflow.run` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L85>)
+- `workflow.collaborative_loop.langgraph` → [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L313>)
 - `workflow.branch_comparison` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1068>)
 - `workflow.run_tests` -> [`packages/agent-core/src/agent_core/workflow/pipeline.py`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L1424>)
 - `parallel_branches.choose` -> [`packages/agent-core/src/agent_core/workflow/parallel_branches.py`](<../packages/agent-core/src/agent_core/workflow/parallel_branches.py#L33>)
@@ -391,11 +391,59 @@
 - `tools.safe_environment` -> [`packages/tools/src/assistant_tools/security.py`](<../packages/tools/src/assistant_tools/security.py#L189>)
 
 
+
+## 20. LangGraph 工作流迁移
+
+当前 Agent 执行已经从单纯的 Python `for` 循环迁移为“LangGraph 优先、旧循环回退”的结构。主入口仍然是 [`CodeTaskWorkflow._run_collaborative_loop`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L313>)：它调用 [`run_agent_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L78>)，并把 `workflow`、事件回调和 `task_id` 显式传入；只有捕获 `LangGraphUnavailable` 时，才进入 [`_run_collaborative_loop_fallback`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L379>)。
+
+### 主任务图
+
+[`run_agent_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L78>) 使用 `StateGraph(AgentGraphState)` 构建节点和边。状态中保存检索结果、当前上下文、baseline/最终测试、当前决策、补丁、快照、分支历史、审查结果和下一节点等信息，定义见 [`AgentGraphState`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L29>)。
+
+图的主路径是：
+
+1. `retrieval_context`：读取 planner 或 reviewer 要求的文件。
+2. `planner`：调用五分支选择器，决定继续读文件、申请审批、执行补丁或进入审查。
+3. `approval_gate`：启用人工审批时用 LangGraph `interrupt` 暂停；拒绝则不改工作区。
+4. `executor`：创建快照、校验工作区路径、写入补丁并运行测试。
+5. `reviewer`：结合测试和 diff 决定批准、修订或拒绝。
+6. `rollback`：审查不通过时恢复快照并回到 planner。
+7. `finish`：生成分支比较摘要并发出 `branch.comparison.completed`。
+
+节点注册与条件边集中在 [`run_agent_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L97>)。规划动作通过 [`_route`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L199>) 转换为图中的下一个节点，因而“读更多上下文”“应用补丁”“回滚重试”都变成显式的状态迁移。
+
+### 运行时上下文
+
+图状态只保存可序列化的任务数据，不再把 `workflow` 和 `emit` 长期放在状态里。`run_agent_graph` 使用 [`AgentGraphRuntime`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L20>) 和 [`_runtime_context`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L26>) 保存当前运行时对象；节点通过 [`_runtime`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L187>) 获取它们。
+
+这样做的关键意义是：`workflow`、异步事件回调等运行时依赖不会进入 checkpoint 序列化数据，而任务状态仍然可以被 LangGraph 保存和恢复。执行结束后会在 `finally` 中重置 `ContextVar`，避免不同异步任务之间串用运行时对象。
+
+### Checkpoint、线程和恢复
+
+`run_agent_graph` 接受可选的 `checkpointer`、`thread_id` 和 `resume`。当传入 checkpointer 时，编译图会保存状态，并将 `thread_id` 放入 `configurable`；当需要从人工审批中恢复时，使用 LangGraph 的 `Command(resume=...)` 继续执行，相关逻辑见 [`run_agent_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L118>)。
+
+项目将 LangGraph 声明为可选依赖，配置位于 [`pyproject.toml`](<../pyproject.toml#L12>)。[`langgraph_available`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L70>) 只在需要时导入并检测依赖，缺少 LangGraph 不会影响旧回退路径。
+
+### 聊天、子目标和生命周期图
+
+同一个模块还提供几个小型图：
+
+- [`run_chat_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L134>)：先让 chat agent 生成回答，再按 implementation、panel 或 informational 意图路由，最后由 chat reviewer 检查回答。
+- [`run_subgoal_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L470>)：按 `inspect → implement → verify` 顺序执行三个子目标；没有 LangGraph 时按同样顺序手动执行。
+- [`run_task_lifecycle_graph`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L542>)：按 `prepare → execute → persist` 组织任务生命周期，并提供无依赖回退。
+
+### 执行器和审查器的关键边界
+
+[`_executor_node`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L300>) 支持 `read_file`、`run_tests`、`finish` 和写补丁等动作；写补丁前先保存快照，目标路径必须位于工作区内。写入成功后立即产生 `patch.applied` 并测试。[`_reviewer_node`](<../packages/agent-core/src/agent_core/workflow/langgraph_workflow.py#L390>) 会把“reviewer 批准但测试失败”强制改成 `revise`，确保最终成功仍然需要测试通过。
+
+### 迁移测试
+
+LangGraph 节点和回退行为由 [`test_langgraph_workflow.py`](<../apps/api/tests/test_langgraph_workflow.py#L1>) 覆盖，包括安全写入、审查回滚、缺少 LangGraph 时的回退、聊天图、多子目标图、生命周期图以及 checkpointer 路径。
 ## 关键实现说明（按当前代码）
 
 ### 任务生命周期与成功判定
 
-[`TaskService._execute`](<../apps/api/services/task_service.py#L74>) 是后端闭环的编排入口：它先检索历史记忆，再创建 [`DemoWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L65>)，通过内部 `emit` 回调把工作流事件统一交给 [`EventService`](<../apps/api/services/event_service.py#L19>)，同时调用 [`_apply_progress_event`](<../apps/api/services/task_service.py#L296>) 推进任务状态。
+[`TaskService._execute`](<../apps/api/services/task_service.py#L74>) 是后端闭环的编排入口：它先检索历史记忆，再创建 [`CodeTaskWorkflow`](<../packages/agent-core/src/agent_core/workflow/pipeline.py#L65>)，通过内部 `emit` 回调把工作流事件统一交给 [`EventService`](<../apps/api/services/event_service.py#L19>)，同时调用 [`_apply_progress_event`](<../apps/api/services/task_service.py#L296>) 推进任务状态。
 
 工作流完成后，服务层并不是只看测试结果，而是要求 `result.final_test.passed` 且 `result.review_decision == 'approve'`；这段双重判定位于 [`_execute`](<../apps/api/services/task_service.py#L154>)。因此“测试通过但 reviewer 不批准”仍会进入 `failed`，并保留 diff、测试报告和错误原因，便于继续追问或重新运行。
 
@@ -420,7 +468,7 @@
 ### 当前代码边界
 
 当前补丁模型主要支持单文件创建或已有文件的一次文本替换；五个并行分支是“决策候选”的并行比较，不是五份工作区的并行写入；任务最终成功必须同时满足测试通过和 reviewer 批准。
-## 20. 最后一句话
+## 21. 最后一句话
 
 这个项目的核心不是“会聊天”，而是“会把任务真正做完”。
 
